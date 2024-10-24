@@ -23,9 +23,9 @@ import (
 )
 
 var (
-	cfg               *config.Config
+	cfg                *config.Config
 	transcriptionLocks sync.Map
-	rateLimiter       *rate.Limiter
+	rateLimiter        *rate.Limiter
 )
 
 type transcriptionLock struct {
@@ -142,12 +142,48 @@ func runTranscriptionScript(ctx context.Context, url string) (string, error) {
 	log.Printf("INFO: Starting transcription for URL: %s", url)
 
 	const (
-		maxRetries    = 3
+		maxRetries     = 3
 		initialBackoff = 2 * time.Second
-		maxBackoff    = 30 * time.Second
-		backoffFactor = 2.0
+		maxBackoff     = 30 * time.Second
+		backoffFactor  = 2.0
 	)
 
+	output, err := executeTranscriptionScript(ctx, url, maxRetries, initialBackoff, maxBackoff, backoffFactor)
+	if err != nil {
+		return "", err
+	}
+
+	filename, err := extractFilename(output)
+	if err != nil {
+		return "", err
+	}
+
+	if err := validateTranscriptionFile(filename); err != nil {
+		return "", err
+	}
+
+	defer func() {
+		if err := os.Remove(filename); err != nil {
+			log.Printf("ERROR: Failed to remove file %s: %v", filename, err)
+		}
+	}()
+
+	fileContent, err := os.ReadFile(filename)
+	if err != nil {
+		log.Printf("ERROR: Failed to read file %s: %v", filename, err)
+		return "", fmt.Errorf("error reading file: %v", err)
+	}
+	text := string(fileContent)
+	if text == "" {
+		log.Printf("ERROR: Transcription resulted in empty text for URL: %s", url)
+		return "", fmt.Errorf("error transcribing")
+	}
+
+	log.Printf("INFO: Transcription for URL %s completed successfully.", url)
+	return text, nil
+}
+
+func executeTranscriptionScript(ctx context.Context, url string, maxRetries int, initialBackoff, maxBackoff time.Duration, backoffFactor float64) ([]byte, error) {
 	var (
 		output []byte
 		err    error
@@ -172,36 +208,41 @@ func runTranscriptionScript(ctx context.Context, url string) (string, error) {
 			// Continue to the next retry attempt
 		case <-ctx.Done():
 			log.Printf("ERROR: Context cancelled during transcription for URL %s: %v", url, ctx.Err())
-			return "", ctx.Err()
+			return nil, ctx.Err()
 		}
 	}
 
 	if err != nil {
 		log.Printf("ERROR: Transcription failed after %d attempts for URL %s: %v, output: %s", maxRetries, url, err, output)
-		return "", fmt.Errorf("error transcribing after %d attempts: %v, output: %s", maxRetries, err, output)
+		return nil, fmt.Errorf("error transcribing after %d attempts: %v, output: %s", maxRetries, err, output)
 	}
 
+	return output, nil
+}
+
+func extractFilename(output []byte) (string, error) {
 	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
 	filename := lines[len(lines)-1]
-	defer func() {
-		if err := os.Remove(filename); err != nil {
-			log.Printf("ERROR: Failed to remove file %s: %v", filename, err)
-		}
-	}()
 
-	fileContent, err := os.ReadFile(filename)
+	if filename == "" {
+		log.Printf("ERROR: Transcription script returned an empty filename")
+		return "", fmt.Errorf("error: transcription script returned an empty filename")
+	}
+
+	return filename, nil
+}
+
+func validateTranscriptionFile(filename string) error {
+	_, err := os.Stat(filename)
 	if err != nil {
-		log.Printf("ERROR: Failed to read file %s: %v", filename, err)
-		return "", fmt.Errorf("error reading file: %v", err)
+		if os.IsNotExist(err) {
+			log.Printf("ERROR: Transcription file does not exist: %s", filename)
+			return fmt.Errorf("error: transcription file does not exist: %s", filename)
+		}
+		log.Printf("ERROR: Failed to stat file %s: %v", filename, err)
+		return fmt.Errorf("error: failed to stat file: %v", err)
 	}
-	text := string(fileContent)
-	if text == "" {
-		log.Printf("ERROR: Transcription resulted in empty text for URL: %s", url)
-		return "", fmt.Errorf("error transcribing")
-	}
-
-	log.Printf("INFO: Transcription for URL %s completed successfully.", url)
-	return text, nil
+	return nil
 }
 
 func serveIndex(w http.ResponseWriter, r *http.Request) {
