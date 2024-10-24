@@ -137,6 +137,12 @@ func runTranscriptionScript(url string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("Error reading file: %v", err)
 	}
+	
+	err = os.Remove(filename)
+	if err != nil {
+	    return "", fmt.Errorf("Error deleting file: %v", err)
+	}
+	
 	text := string(fileContent)
 	if text == "" {
 		return "", fmt.Errorf("Error transcribing")
