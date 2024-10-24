@@ -1,97 +1,150 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>yt-text</title>
-    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
-</head>
-<body class="bg-gray-100 text-gray-900">
-    <div class="container mx-auto p-4">
-        <h1 class="text-4xl font-bold mb-4">yt-text</h1>
-        <form id="transcriptionForm" class="mb-4">
-            <label for="url" class="block text-lg font-medium mb-2">Enter URL:</label>
-            <input type="url" id="url" name="url" class="w-full p-2 border border-gray-300 rounded mb-4" required>
-            <button type="submit" class="bg-blue-500 text-white px-4 py-2 rounded">Submit</button>
-        </form>
-        <div id="response" class="mt-4"></div>
-        <button id="copyButton" class="bg-yellow-500 text-white px-4 py-2 rounded mt-4 hidden">Copy to Clipboard</button>
-        <button id="downloadButton" class="bg-green-500 text-white px-4 py-2 rounded mt-4 hidden">Download as Text File</button>
-    </div>
-    <script>
-        let controller;
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>yt-text</title>
+        <link
+            href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css"
+            rel="stylesheet"
+        />
+    </head>
+    <body class="bg-gray-100 text-gray-900">
+        <div class="container mx-auto p-4">
+            <h1 class="text-4xl font-bold mb-4">yt-text</h1>
+            <form id="transcriptionForm" class="mb-4">
+                <label for="url" class="block text-lg font-medium mb-2"
+                    >Enter URL:</label
+                >
+                <input
+                    type="url"
+                    id="url"
+                    name="url"
+                    class="w-full p-2 border border-gray-300 rounded mb-4"
+                    required
+                />
+                <button
+                    type="submit"
+                    class="bg-blue-500 text-white px-4 py-2 rounded"
+                >
+                    Submit
+                </button>
+            </form>
+            <div id="response" class="mt-4"></div>
+            <button
+                id="copyButton"
+                class="bg-yellow-500 text-white px-4 py-2 rounded mt-4 hidden"
+            >
+                Copy to Clipboard
+            </button>
+            <button
+                id="downloadButton"
+                class="bg-green-500 text-white px-4 py-2 rounded mt-4 hidden"
+            >
+                Download as Text File
+            </button>
+        </div>
+        <script>
+            let controller;
 
-        document.getElementById('transcriptionForm').addEventListener('submit', function(event) {
-            event.preventDefault();
-            const submitButton = document.querySelector('button[type="submit"]');
-            document.getElementById('response').innerText = ''; // Clear response
-            document.getElementById('copyButton').classList.add('hidden'); // Hide copy button
-            document.getElementById('downloadButton').classList.add('hidden'); // Hide download button
-            const url = document.getElementById('url').value;
+            document
+                .getElementById("transcriptionForm")
+                .addEventListener("submit", (event) => {
+                    event.preventDefault();
+                    const submitButton = document.querySelector(
+                        'button[type="submit"]',
+                    );
+                    document.getElementById("response").innerText = ""; // Clear response
+                    document
+                        .getElementById("copyButton")
+                        .classList.add("hidden"); // Hide copy button
+                    document
+                        .getElementById("downloadButton")
+                        .classList.add("hidden"); // Hide download button
+                    const url = document.getElementById("url").value;
 
-            // Create a new AbortController instance
-            controller = new AbortController();
-            const signal = controller.signal;
+                    // Create a new AbortController instance
+                    controller = new AbortController();
+                    const signal = controller.signal;
 
-            fetch('/transcribe', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                },
-                body: new URLSearchParams({
-                    'url': url
-                }),
-                signal: signal // Pass the signal to the fetch request
-            })
-            .then(response => {
-                if (!response.ok) {
-                    throw new Error('Network response was not ok');
+                    console.log(
+                        "Sending request to /transcribe with URL:",
+                        url,
+                    );
+
+                    fetch("/transcribe", {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/x-www-form-urlencoded",
+                        },
+
+                        body: new URLSearchParams({
+                            url: url,
+                        }),
+                        signal: signal, // Pass the signal to the fetch request
+                    })
+                        .then((response) => {
+                            console.log("Received response:", response);
+                            if (!response.ok) {
+                                throw new Error("Network response was not ok");
+                            }
+                            return response.json();
+                        })
+                        .then((data) => {
+                            console.log("Received data:", data);
+                            const responseDiv =
+                                document.getElementById("response");
+                            responseDiv.innerText = data.transcription;
+
+                            const copyButton =
+                                document.getElementById("copyButton");
+                            copyButton.classList.remove("hidden"); // Show copy button
+                            copyButton.onclick = () => {
+                                navigator.clipboard
+                                    .writeText(data.transcription)
+                                    .then(() => {
+                                        alert("Text copied to clipboard");
+                                    })
+                                    .catch((err) => {
+                                        alert(`Failed to copy text: ${err}`);
+                                    });
+                            };
+
+                            const downloadButton =
+                                document.getElementById("downloadButton");
+                            downloadButton.classList.remove("hidden"); // Show download button
+                            downloadButton.onclick = () => {
+                                const blob = new Blob([data.transcription], {
+                                    type: "text/plain",
+                                });
+                                const link = document.createElement("a");
+                                link.href = URL.createObjectURL(blob);
+                                link.download = `${url.replace(/[^a-z0-9]/gi, "_").toLowerCase()}.txt`;
+                                link.click();
+                            };
+                        })
+                        .catch((error) => {
+                            console.error("Error:", error);
+                            if (error.name === "AbortError") {
+                                document.getElementById("response").innerText =
+                                    "Request was cancelled";
+                            } else {
+                                document.getElementById("response").innerText =
+                                    `Error: ${error.message}`;
+                            }
+                        })
+                        .finally(() => {
+                            submitButton.disabled = false;
+                        });
+
+                    submitButton.disabled = true; // Disable the button after sending the request
+                });
+
+            window.addEventListener("beforeunload", () => {
+                if (controller) {
+                    controller.abort(); // Abort the fetch request if the user leaves the page
                 }
-                return response.json();
-            })
-            .then(data => {
-                const responseDiv = document.getElementById('response');
-                responseDiv.innerText = data.transcription;
-
-                const copyButton = document.getElementById('copyButton');
-                copyButton.classList.remove('hidden'); // Show copy button
-                copyButton.onclick = function() {
-                    navigator.clipboard.writeText(data.transcription).then(() => {
-                        alert('Text copied to clipboard');
-                    }).catch(err => {
-                        alert('Failed to copy text: ' + err);
-                    });
-                };
-
-                const downloadButton = document.getElementById('downloadButton');
-                downloadButton.classList.remove('hidden'); // Show download button
-                downloadButton.onclick = function() {
-                    const blob = new Blob([data.transcription], { type: 'text/plain' });
-                    const link = document.createElement('a');
-                    link.href = URL.createObjectURL(blob);
-                    link.download = `${url.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.txt`;
-                    link.click();
-                };
-            })
-            .catch(error => {
-                if (error.name === 'AbortError') {
-                    document.getElementById('response').innerText = 'Request was cancelled';
-                } else {
-                    document.getElementById('response').innerText = 'Error: ' + error.message;
-                }
-            })
-            .finally(() => {
-                submitButton.disabled = false;
             });
-
-            submitButton.disabled = true; // Disable the button after sending the request
-        });
-
-        window.addEventListener('beforeunload', function() {
-            if (controller) {
-                controller.abort(); // Abort the fetch request if the user leaves the page
-            }
-        });
-    </script>
-</body>
+        </script>
+    </body>
 </html>
