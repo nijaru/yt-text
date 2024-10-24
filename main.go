@@ -205,11 +205,19 @@ func serveIndex(w http.ResponseWriter, r *http.Request) {
 func main() {
 	cfg = config.LoadConfig()
 
+	if err := validateConfig(cfg); err != nil {
+		log.Fatalf("Invalid configuration: %v", err)
+	}
+
 	err := db.InitializeDB(cfg.DBPath)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("Failed to initialize database: %v", err)
 	}
-	defer db.DB.Close()
+	defer func() {
+		if err := db.DB.Close(); err != nil {
+			log.Printf("Error closing database: %v", err)
+		}
+	}()
 
 	// Initialize rate limiter
 	rateLimiter = rate.NewLimiter(rate.Every(1*time.Second), 5) // 5 requests per second
@@ -244,4 +252,26 @@ func main() {
 	if err := server.Shutdown(ctx); err != nil {
 		log.Fatalf("Server Shutdown: %v", err)
 	}
+}
+
+func validateConfig(cfg *config.Config) error {
+	if cfg.ServerPort == "" {
+		return fmt.Errorf("server port is required")
+	}
+	if cfg.DBPath == "" {
+		return fmt.Errorf("database path is required")
+	}
+	if cfg.TranscribeTimeout <= 0 {
+		return fmt.Errorf("transcribe timeout must be greater than 0")
+	}
+	if cfg.ReadTimeout <= 0 {
+		return fmt.Errorf("read timeout must be greater than 0")
+	}
+	if cfg.WriteTimeout <= 0 {
+		return fmt.Errorf("write timeout must be greater than 0")
+	}
+	if cfg.IdleTimeout <= 0 {
+		return fmt.Errorf("idle timeout must be greater than 0")
+	}
+	return nil
 }

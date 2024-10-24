@@ -59,45 +59,78 @@ func GetTranscription(ctx context.Context, url string) (string, string, error) {
 }
 
 func SetTranscription(ctx context.Context, url, text string) error {
-	stmt, err := DB.PrepareContext(ctx, "INSERT INTO urls (url, text, status) VALUES (?, ?, 'completed') ON CONFLICT(url) DO UPDATE SET text=excluded.text, status='completed'")
+	tx, err := DB.BeginTx(ctx, nil)
 	if err != nil {
+		return fmt.Errorf("error beginning transaction: %v", err)
+	}
+
+	stmt, err := tx.PrepareContext(ctx, "INSERT INTO urls (url, text, status) VALUES (?, ?, 'completed') ON CONFLICT(url) DO UPDATE SET text=excluded.text, status='completed'")
+	if err != nil {
+		tx.Rollback()
 		return fmt.Errorf("error preparing statement: %v", err)
 	}
 	defer stmt.Close()
 
 	_, err = stmt.ExecContext(ctx, url, text)
 	if err != nil {
+		tx.Rollback()
 		return fmt.Errorf("error executing statement: %v", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("error committing transaction: %v", err)
 	}
 
 	return nil
 }
 
 func SetTranscriptionStatus(ctx context.Context, url, status string) error {
-	stmt, err := DB.PrepareContext(ctx, "UPDATE urls SET status = ? WHERE url = ?")
+	tx, err := DB.BeginTx(ctx, nil)
 	if err != nil {
+		return fmt.Errorf("error beginning transaction: %v", err)
+	}
+
+	stmt, err := tx.PrepareContext(ctx, "UPDATE urls SET status = ? WHERE url = ?")
+	if err != nil {
+		tx.Rollback()
 		return fmt.Errorf("error preparing statement: %v", err)
 	}
 	defer stmt.Close()
 
 	_, err = stmt.ExecContext(ctx, status, url)
 	if err != nil {
+		tx.Rollback()
 		return fmt.Errorf("error executing statement: %v", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("error committing transaction: %v", err)
 	}
 
 	return nil
 }
 
 func DeleteTranscription(ctx context.Context, url string) error {
-	stmt, err := DB.PrepareContext(ctx, "DELETE FROM urls WHERE url = ?")
+	tx, err := DB.BeginTx(ctx, nil)
 	if err != nil {
+		return fmt.Errorf("error beginning transaction: %v", err)
+	}
+
+	stmt, err := tx.PrepareContext(ctx, "DELETE FROM urls WHERE url = ?")
+	if err != nil {
+		tx.Rollback()
 		return fmt.Errorf("error preparing delete statement: %v", err)
 	}
 	defer stmt.Close()
 
 	_, err = stmt.ExecContext(ctx, url)
 	if err != nil {
+		tx.Rollback()
 		return fmt.Errorf("error executing delete statement: %v", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("error committing transaction: %v", err)
 	}
 
 	return nil
