@@ -19,6 +19,8 @@
         <button id="downloadButton" class="bg-green-500 text-white px-4 py-2 rounded mt-4 hidden">Download as Text File</button>
     </div>
     <script>
+        let controller;
+
         document.getElementById('transcriptionForm').addEventListener('submit', function(event) {
             event.preventDefault();
             const submitButton = document.querySelector('button[type="submit"]');
@@ -26,6 +28,11 @@
             document.getElementById('copyButton').classList.add('hidden'); // Hide copy button
             document.getElementById('downloadButton').classList.add('hidden'); // Hide download button
             const url = document.getElementById('url').value;
+
+            // Create a new AbortController instance
+            controller = new AbortController();
+            const signal = controller.signal;
+
             fetch('/transcribe', {
                 method: 'POST',
                 headers: {
@@ -33,7 +40,8 @@
                 },
                 body: new URLSearchParams({
                     'url': url
-                })
+                }),
+                signal: signal // Pass the signal to the fetch request
             })
             .then(response => {
                 if (!response.ok) {
@@ -66,12 +74,23 @@
                 };
             })
             .catch(error => {
-                document.getElementById('response').innerText = 'Error: ' + error.message;
+                if (error.name === 'AbortError') {
+                    document.getElementById('response').innerText = 'Request was cancelled';
+                } else {
+                    document.getElementById('response').innerText = 'Error: ' + error.message;
+                }
             })
             .finally(() => {
                 submitButton.disabled = false;
             });
+
             submitButton.disabled = true; // Disable the button after sending the request
+        });
+
+        window.addEventListener('beforeunload', function() {
+            if (controller) {
+                controller.abort(); // Abort the fetch request if the user leaves the page
+            }
         });
     </script>
 </body>
