@@ -3,9 +3,6 @@ document.addEventListener('DOMContentLoaded', function() {
     const submitButton = document.querySelector('button[type="submit"]');
     submitButton.addEventListener('click', function(event) {
         submitButton.disabled = true;
-        setTimeout(function() {
-            submitButton.disabled = false;
-        }, 1000);
     });
 });
 </script><!DOCTYPE html>
@@ -30,6 +27,8 @@ document.addEventListener('DOMContentLoaded', function() {
     <script>
         document.getElementById('transcriptionForm').addEventListener('submit', function(event) {
             event.preventDefault();
+            const submitButton = document.querySelector('button[type="submit"]');
+            submitButton.disabled = true;
             document.getElementById('response').innerText = ''; // Clear response
             document.getElementById('downloadButton').classList.add('hidden'); // Hide download button
             const url = document.getElementById('url').value;
@@ -73,6 +72,9 @@ document.addEventListener('DOMContentLoaded', function() {
             })
             .catch(error => {
                 document.getElementById('response').innerText = 'Error: ' + error.message;
+            })
+            .finally(() => {
+                submitButton.disabled = false;
             });
         });
     </script>
