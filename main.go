@@ -36,8 +36,9 @@ func initializeDB() error {
 
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS urls (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        url TEXT NOT NULL,
-                        text TEXT NOT NULL
+                        url TEXT NOT NULL UNIQUE,
+                        text TEXT,
+                        status TEXT NOT NULL DEFAULT 'pending'
     )`)
 	if err != nil {
 		return fmt.Errorf("error creating table: %v", err)
@@ -65,33 +66,50 @@ func validateURL(rawURL string) error {
 	return nil
 }
 
-func getTranscription(ctx context.Context, url string) (string, bool, error) {
-	var body sql.NullString
-	err := db.QueryRowContext(ctx, "SELECT text FROM urls WHERE url = ?", url).Scan(&body)
+func getTranscription(ctx context.Context, url string) (string, string, error) {
+	var text sql.NullString
+	var status string
+	err := db.QueryRowContext(ctx, "SELECT text, status FROM urls WHERE url = ?", url).Scan(&text, &status)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return "", false, nil
+			return "", "pending", nil
 		}
-		return "", false, fmt.Errorf("error querying database: %v", err)
+		return "", "", fmt.Errorf("error querying database: %v", err)
 	}
 
-	if !body.Valid {
-		return "", true, nil
+	if !text.Valid {
+		return "", status, nil
 	}
 
-	return body.String, true, nil
+	return text.String, status, nil
 }
 
-func setTranscription(ctx context.Context, url, text string) error {
-	stmt, err := db.PrepareContext(ctx, "INSERT INTO urls (url, text) VALUES (?, ?) ON CONFLICT(url) DO UPDATE SET text=excluded.text")
+func setTranscriptionStatus(ctx context.Context, url, status string) error {
+	log.Printf("Setting transcription status for URL %s to %s", url, status)
+	stmt, err := db.PrepareContext(ctx, "UPDATE urls SET status = ? WHERE url = ?")
 	if err != nil {
 		return fmt.Errorf("error preparing statement: %v", err)
 	}
 	defer stmt.Close()
 
-	_, err = stmt.ExecContext(ctx, url, text)
+	_, err = stmt.ExecContext(ctx, status, url)
 	if err != nil {
 		return fmt.Errorf("error executing statement: %v", err)
+	}
+
+	return nil
+}
+
+func deleteTranscription(ctx context.Context, url string) error {
+	stmt, err := db.PrepareContext(ctx, "DELETE FROM urls WHERE url = ?")
+	if err != nil {
+		return fmt.Errorf("error preparing delete statement: %v", err)
+	}
+	defer stmt.Close()
+
+	_, err = stmt.ExecContext(ctx, url)
+	if err != nil {
+		return fmt.Errorf("error executing delete statement: %v", err)
 	}
 
 	return nil
@@ -125,23 +143,18 @@ func transcribeHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleTranscription(ctx context.Context, url string) (string, error) {
-	text, found, err := getTranscription(ctx, url)
+	text, status, err := getTranscription(ctx, url)
 	if err != nil {
 		return "", err
 	}
 
-	if found && text != "" {
+	if status == "completed" {
 		log.Printf("Transcription for URL %s found in database.", url)
 		return text, nil
 	}
 
-	if !found {
-		log.Printf("Transcription for URL %s not found in database. Proceeding to transcribe...", url)
-		if err := setTranscription(ctx, url, ""); err != nil {
-			return "", fmt.Errorf("error inserting empty transcription: %v", err)
-		}
-	} else {
-		log.Printf("Transcription for URL %s not found in database. Waiting for it to be processed...", url)
+	if status == "in_progress" {
+		log.Printf("Transcription for URL %s is in progress. Waiting for it to be processed...", url)
 		text, err = waitForTranscription(ctx, url)
 		if err != nil {
 			return "", err
@@ -151,12 +164,41 @@ func handleTranscription(ctx context.Context, url string) (string, error) {
 		}
 	}
 
+	if status == "pending" {
+		log.Printf("Transcription for URL %s not found in database. Proceeding to transcribe...", url)
+		if err := setTranscriptionStatus(ctx, url, "in_progress"); err != nil {
+			return "", fmt.Errorf("error setting transcription status: %v", err)
+		}
+	}
+
 	text, err = runTranscriptionScript(ctx, url)
 	if err != nil {
+		setTranscriptionStatus(ctx, url, "failed")
 		return "", err
 	}
 
-	if err := setTranscription(ctx, url, text); err != nil {
+	err = setTranscription(ctx, url, text)
+	if err != nil {
+		return "", fmt.Errorf("error saving transcription: %v", err)
+	}
+
+	setTranscriptionStatus(ctx, url, "completed")
+	return text, nil
+}
+
+	text, err = runTranscriptionScript(ctx, url)
+	if err != nil {
+		// Use a new context for the delete operation to avoid context cancellation issues
+		deleteCtx, deleteCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer deleteCancel()
+		if deleteErr := deleteTranscription(deleteCtx, url); deleteErr != nil {
+			log.Printf("Error removing transcription: %v", deleteErr)
+		}
+		return "", err
+	}
+
+	err = setTranscription(ctx, url, text)
+	if err != nil {
 		return "", fmt.Errorf("error saving transcription: %v", err)
 	}
 
@@ -172,13 +214,16 @@ func waitForTranscription(ctx context.Context, url string) (string, error) {
 		case <-ctx.Done():
 			return "", ctx.Err()
 		case <-ticker.C:
-			text, _, err := getTranscription(ctx, url)
+			text, status, err := getTranscription(ctx, url)
 			if err != nil {
 				return "", err
 			}
-			if text != "" {
+			if status == "completed" {
 				log.Printf("Transcription for URL %s found in database.", url)
 				return text, nil
+			}
+			if status == "failed" {
+				return "", fmt.Errorf("transcription failed for URL %s", url)
 			}
 		}
 	}
