@@ -15,10 +15,13 @@
             <button type="submit" class="bg-blue-500 text-white px-4 py-2 rounded">Submit</button>
         </form>
         <div id="response" class="mt-4"></div>
+        <button id="downloadButton" class="bg-green-500 text-white px-4 py-2 rounded mt-4 hidden">Download as Text File</button>
     </div>
     <script>
         document.getElementById('transcriptionForm').addEventListener('submit', function(event) {
             event.preventDefault();
+            document.getElementById('response').innerText = ''; // Clear response
+            document.getElementById('downloadButton').classList.add('hidden'); // Hide download button
             const url = document.getElementById('url').value;
             fetch('/transcribe', {
                 method: 'POST',
@@ -36,7 +39,27 @@
                 return response.json();
             })
             .then(data => {
-                document.getElementById('response').innerText = data.transcription;
+                const responseDiv = document.getElementById('response');
+                responseDiv.innerText = data.transcription;
+                responseDiv.style.cursor = 'pointer';
+                responseDiv.title = 'Click to copy';
+                responseDiv.addEventListener('click', function() {
+                    navigator.clipboard.writeText(data.transcription).then(() => {
+                        alert('Text copied to clipboard');
+                    }).catch(err => {
+                        alert('Failed to copy text: ' + err);
+                    });
+                });
+
+                const downloadButton = document.getElementById('downloadButton');
+                downloadButton.classList.remove('hidden'); // Show download button
+                downloadButton.onclick = function() {
+                    const blob = new Blob([data.transcription], { type: 'text/plain' });
+                    const link = document.createElement('a');
+                    link.href = URL.createObjectURL(blob);
+                    link.download = `${url.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.txt`;
+                    link.click();
+                };
             })
             .catch(error => {
                 document.getElementById('response').innerText = 'Error: ' + error.message;
