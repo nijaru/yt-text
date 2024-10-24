@@ -64,19 +64,20 @@ func validateURL(rawURL string) error {
 }
 
 func getTranscription(url string) (string, bool, error) {
-	var body string
+	var body sql.NullString
 	err := db.QueryRow("SELECT text FROM urls WHERE url = ?", url).Scan(&body)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			if err := setTranscription(url, ""); err != nil {
-				return "", false, fmt.Errorf("Error inserting empty transcription: %v", err)
-			}
 			return "", false, nil
 		}
 		return "", false, fmt.Errorf("Error querying database: %v", err)
 	}
 
-	return body, true, nil
+	if !body.Valid {
+		return "", true, nil
+	}
+
+	return body.String, true, nil
 }
 
 func setTranscription(url, text string) error {
@@ -108,59 +109,75 @@ func transcribeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	text, found, err := getTranscription(url)
+	text, err := handleTranscription(url)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
-		log.Println(err)
-		return
-	}
-	if text != "" {
-		log.Printf("Transcription for URL %s found in database.", url)
-		sendJSONResponse(w, text)
-		return
-	}
-
-	// if transcription already in progress
-	if found {
-		log.Printf("Transcription for URL %s not found in database. Waiting for it to be processed...", url)
-		timeout := time.After(1 * time.Minute)
-		tick := time.Tick(5 * time.Second)
-
-		for {
-			select {
-			case <-timeout:
-				log.Printf("Timeout waiting for transcription for URL %s. Proceeding to transcribe...", url)
-				break
-			case <-tick:
-				text, found, err = getTranscription(url)
-				if err != nil {
-					http.Error(w, err.Error(), http.StatusInternalServerError)
-					log.Println(err)
-					return
-				}
-				if text != "" {
-					log.Printf("Transcription for URL %s found in database.", url)
-					sendJSONResponse(w, text)
-					return
-				}
-			}
-		}
-	}
-	
-	text, err = runTranscriptionScript(url)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		log.Println(err)
-		return
-	}
-
-	if err := setTranscription(url, text); err != nil {
-		http.Error(w, fmt.Sprintf("Error saving transcription: %v", err), http.StatusInternalServerError)
 		log.Println(err)
 		return
 	}
 
 	sendJSONResponse(w, text)
+}
+
+func handleTranscription(url string) (string, error) {
+	text, found, err := getTranscription(url)
+	if err != nil {
+		return "", err
+	}
+
+	if found && text != "" {
+		log.Printf("Transcription for URL %s found in database.", url)
+		return text, nil
+	}
+
+	if !found {
+		log.Printf("Transcription for URL %s not found in database. Proceeding to transcribe...", url)
+		if err := setTranscription(url, ""); err != nil {
+			return "", fmt.Errorf("Error inserting empty transcription: %v", err)
+		}
+	} else {
+		log.Printf("Transcription for URL %s not found in database. Waiting for it to be processed...", url)
+		text, err = waitForTranscription(url)
+		if err != nil {
+			return "", err
+		}
+		if text != "" {
+			return text, nil
+		}
+	}
+
+	text, err = runTranscriptionScript(url)
+	if err != nil {
+		return "", err
+	}
+
+	if err := setTranscription(url, text); err != nil {
+		return "", fmt.Errorf("Error saving transcription: %v", err)
+	}
+
+	return text, nil
+}
+
+func waitForTranscription(url string) (string, error) {
+	timeout := time.After(1 * time.Minute)
+	tick := time.Tick(5 * time.Second)
+
+	for {
+		select {
+		case <-timeout:
+			log.Printf("Timeout waiting for transcription for URL %s. Proceeding to transcribe...", url)
+			return "", nil
+		case <-tick:
+			text, _, err := getTranscription(url)
+			if err != nil {
+				return "", err
+			}
+			if text != "" {
+				log.Printf("Transcription for URL %s found in database.", url)
+				return text, nil
+			}
+		}
+	}
 }
 
 func sendJSONResponse(w http.ResponseWriter, text string) {
