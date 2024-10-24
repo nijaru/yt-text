@@ -18,7 +18,7 @@ def download_audio(url) -> str:
             info = ydl.extract_info(url, download=True)
             fname = ydl.prepare_filename(info)
         return fname
-    except yt_dlp.DownloadError as e:
+    except yt_dlp.utils.DownloadError as e:
         raise RuntimeError(f"Failed to download audio: {e}")
     except Exception as e:
         raise RuntimeError(f"An unexpected error occurred: {e}")
@@ -50,7 +50,6 @@ if __name__ == "__main__":
         description="Download audio from youtube video and convert it to text"
     )
     parser.add_argument("url", type=str, help="URL of the youtube video")
-
     args = parser.parse_args()
     url = args.url
 

@@ -52,6 +52,11 @@ func validateURL(rawURL string) error {
 	if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
 		return fmt.Errorf("error: URL must start with http or https")
 	}
+	
+	if err := executeValidationScript(rawURL); err != nil {
+		log.Printf("ERROR: URL validation script failed for URL %s: %v", rawURL, err)
+		return fmt.Errorf("%v", err)
+	}
 
 	return nil
 }
@@ -93,10 +98,10 @@ func transcribeHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleTranscription(ctx context.Context, url string) (string, error) {
-	lock := getTranscriptionLock(url)
+    lock := getTranscriptionLock(url)
 	lock.mu.Lock()
 	defer lock.mu.Unlock()
-
+	
 	text, status, err := db.GetTranscription(ctx, url)
 	if err != nil {
 		log.Printf("ERROR: Failed to get transcription from DB for URL %s: %v", url, err)
@@ -181,6 +186,24 @@ func runTranscriptionScript(ctx context.Context, url string) (string, error) {
 
 	log.Printf("INFO: Transcription for URL %s completed successfully.", url)
 	return text, nil
+}
+
+func executeValidationScript(url string) error {
+    cmd := exec.Command("uv", "run", "validate.py", url)
+    output, err := cmd.CombinedOutput()
+    if err != nil {
+        return fmt.Errorf("error executing validation script: %v, output: %s", err, output)
+    }
+
+    outputLines := strings.Split(strings.TrimSpace(string(output)), "\n")
+    if len(outputLines) == 0 {
+        return fmt.Errorf("error: validation script returned no output")
+    }
+    lastLine := outputLines[len(outputLines)-1]
+    if lastLine != "True" {
+        return fmt.Errorf(lastLine)
+    }
+    return nil
 }
 
 func executeTranscriptionScript(ctx context.Context, url string, maxRetries int, initialBackoff, maxBackoff time.Duration, backoffFactor float64) ([]byte, error) {
