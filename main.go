@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"net/http"
+	"os"
 	"os/exec"
 	"strings"
 
@@ -66,6 +67,21 @@ func getTranscription(url string) (string, error) {
 	return body, nil
 }
 
+func setTranscription(url, text string) error {
+	db, err := sql.Open("sqlite3", "./urls.db")
+	if err != nil {
+		return fmt.Errorf("Error opening database: %v", err)
+	}
+	defer db.Close()
+
+	_, err = db.Exec("INSERT INTO urls (url, text) VALUES (?, ?)", url, text)
+	if err != nil {
+		return fmt.Errorf("Error inserting into database: %v", err)
+	}
+
+	return nil
+}
+
 func transcribeHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
@@ -101,19 +117,28 @@ func transcribeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// get transcription from database
-	text, err = getTranscription(url)
+	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	filename := lines[len(lines)-1]
+
+	fileContent, err := os.ReadFile(filename)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("Error reading file: %v", err), http.StatusInternalServerError)
 		return
 	}
-	if text != "" {
-		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintf(w, `{"transcription": "%s"}`, text)
+	text = string(fileContent)
+	if text == "" {
+		http.Error(w, "Error transcribing", http.StatusInternalServerError)
 		return
 	}
 
-	http.Error(w, "Error transcribing", http.StatusInternalServerError)
+	err = setTranscription(url, text)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Error saving transcription: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	fmt.Fprintf(w, `{"transcription": "%s"}`, text)
 }
 
 func main() {

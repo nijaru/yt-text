@@ -1,23 +1,8 @@
 import argparse
 import os
-import sqlite3
 
 import whisper
 import yt_dlp
-
-
-def initialize_db() -> sqlite3.Connection:
-    conn = sqlite3.connect("urls.db")
-    cursor = conn.cursor()
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS urls (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            url TEXT NOT NULL,
-            text TEXT NOT NULL
-        )
-    """)
-    conn.commit()
-    return conn
 
 
 def download_audio(url) -> str:
@@ -39,9 +24,9 @@ def download_audio(url) -> str:
         raise RuntimeError(f"An unexpected error occurred: {e}")
 
 
-def transcribe_audio(file, model_name):
+def transcribe_audio(file):
     try:
-        model = whisper.load_model(model_name)
+        model = whisper.load_model("tiny.en")
         results = model.transcribe(file)
         text = results["text"]
         os.remove(file)
@@ -50,16 +35,14 @@ def transcribe_audio(file, model_name):
         raise RuntimeError(f"An unexpected error occurred during transcription: {e}")
 
 
-def save_to_db(conn, url, text) -> None:
-    cursor = conn.cursor()
+def save_to_file(file, text) -> str:
     try:
-        cursor.execute(
-            "INSERT INTO urls (url, text) VALUES (?, ?)",
-            (url, text),
-        )
-        conn.commit()
-    except sqlite3.Error as e:
-        raise RuntimeError(f"Failed to save to database: {e}")
+        filename = f"{os.path.splitext(file)[0]}.txt"
+        with open(filename, "w") as f:
+            f.write(text)
+        return filename
+    except Exception as e:
+        raise RuntimeError(f"Failed to save to file: {e}")
 
 
 if __name__ == "__main__":
@@ -71,11 +54,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
     url = args.url
 
-    conn = initialize_db()
-    try:
-        model_name = "tiny.en"
-        audio = download_audio(url)
-        text = transcribe_audio(audio, model_name)
-        save_to_db(conn, url, text)
-    finally:
-        conn.close()
+    model_name = "tiny.en"
+    filename = download_audio(url)
+    text = transcribe_audio(filename)
+    filename = save_to_file(filename, text)
+    print(filename)
