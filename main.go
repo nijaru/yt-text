@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
+	"math/rand"
 	"net/http"
 	"net/url"
 	"os"
@@ -17,11 +19,13 @@ import (
 
 	"github.com/nijaru/yt-text/config"
 	"github.com/nijaru/yt-text/db"
+	"golang.org/x/time/rate"
 )
 
 var (
 	cfg               *config.Config
 	transcriptionLocks sync.Map
+	rateLimiter       *rate.Limiter
 )
 
 func validateURL(rawURL string) error {
@@ -59,6 +63,11 @@ func transcribeHandler(w http.ResponseWriter, r *http.Request) {
 
 	if err := validateURL(url); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if !rateLimiter.Allow() {
+		http.Error(w, "Rate limit exceeded", http.StatusTooManyRequests)
 		return
 	}
 
@@ -158,11 +167,42 @@ func sendJSONResponse(w http.ResponseWriter, text string) {
 func runTranscriptionScript(ctx context.Context, url string) (string, error) {
 	log.Printf("Transcribing URL: %s", url)
 
-	cmd := exec.CommandContext(ctx, "uv", "run", "transcribe.py", url)
-	output, err := cmd.CombinedOutput()
+	const (
+		maxRetries    = 3
+		initialBackoff = 2 * time.Second
+		maxBackoff    = 30 * time.Second
+		backoffFactor = 2.0
+	)
+
+	var (
+		output []byte
+		err    error
+	)
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		cmd := exec.CommandContext(ctx, "uv", "run", "transcribe.py", url)
+		output, err = cmd.CombinedOutput()
+		if err == nil {
+			break
+		}
+
+		log.Printf("Error running transcription script (attempt %d/%d): %v, output: %s", attempt, maxRetries, err, output)
+
+		backoff := time.Duration(float64(initialBackoff) * math.Pow(backoffFactor, float64(attempt-1)))
+		if backoff > maxBackoff {
+			backoff = maxBackoff
+		}
+
+		select {
+		case <-time.After(backoff + time.Duration(rand.Int63n(int64(backoff/2)))):
+			// Continue to the next retry attempt
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
+	}
+
 	if err != nil {
-		log.Printf("Error running transcription script: %v, output: %s", err, output)
-		return "", fmt.Errorf("error transcribing: %v, output: %s", err, output)
+		return "", fmt.Errorf("error transcribing after %d attempts: %v, output: %s", maxRetries, err, output)
 	}
 
 	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
@@ -201,6 +241,9 @@ func main() {
 		log.Fatal(err)
 	}
 	defer db.DB.Close()
+
+	// Initialize rate limiter
+	rateLimiter = rate.NewLimiter(rate.Every(1*time.Second), 5) // 5 requests per second
 
 	http.HandleFunc("/", serveIndex)
 	http.HandleFunc("/transcribe", transcribeHandler)

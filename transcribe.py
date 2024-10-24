@@ -1,9 +1,9 @@
 import argparse
 import os
+import sys
 
 import whisper
 import yt_dlp
-
 
 def download_audio(url) -> str:
     ydl_opts = {
@@ -23,17 +23,14 @@ def download_audio(url) -> str:
     except Exception as e:
         raise RuntimeError(f"An unexpected error occurred: {e}")
 
-
 def transcribe_audio(file):
     try:
         model = whisper.load_model("tiny.en")
         results = model.transcribe(file)
         text = results["text"]
-        os.remove(file)
         return text
     except Exception as e:
         raise RuntimeError(f"An unexpected error occurred during transcription: {e}")
-
 
 def save_to_file(file, text) -> str:
     try:
@@ -44,7 +41,6 @@ def save_to_file(file, text) -> str:
     except Exception as e:
         raise RuntimeError(f"Failed to save to file: {e}")
 
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Download audio from youtube video and convert it to text"
@@ -54,8 +50,19 @@ if __name__ == "__main__":
     args = parser.parse_args()
     url = args.url
 
-    model_name = "tiny.en"
-    filename = download_audio(url)
-    text = transcribe_audio(filename)
-    filename = save_to_file(filename, text)
-    print(filename)
+    audio_file = None
+    text_file = None
+
+    try:
+        audio_file = download_audio(url)
+        text = transcribe_audio(audio_file)
+        text_file = save_to_file(audio_file, text)
+        print(text_file)
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+    finally:
+        if audio_file and os.path.exists(audio_file):
+            os.remove(audio_file)
+        if text_file and os.path.exists(text_file):
+            os.remove(text_file)
