@@ -84,8 +84,22 @@ func getTranscription(ctx context.Context, url string) (string, string, error) {
 	return text.String, status, nil
 }
 
+func setTranscription(ctx context.Context, url, text string) error {
+	stmt, err := db.PrepareContext(ctx, "INSERT INTO urls (url, text, status) VALUES (?, ?, 'completed') ON CONFLICT(url) DO UPDATE SET text=excluded.text, status='completed'")
+	if err != nil {
+		return fmt.Errorf("error preparing statement: %v", err)
+	}
+	defer stmt.Close()
+
+	_, err = stmt.ExecContext(ctx, url, text)
+	if err != nil {
+		return fmt.Errorf("error executing statement: %v", err)
+	}
+
+	return nil
+}
+
 func setTranscriptionStatus(ctx context.Context, url, status string) error {
-	log.Printf("Setting transcription status for URL %s to %s", url, status)
 	stmt, err := db.PrepareContext(ctx, "UPDATE urls SET status = ? WHERE url = ?")
 	if err != nil {
 		return fmt.Errorf("error preparing statement: %v", err)
@@ -183,25 +197,6 @@ func handleTranscription(ctx context.Context, url string) (string, error) {
 	}
 
 	setTranscriptionStatus(ctx, url, "completed")
-	return text, nil
-}
-
-	text, err = runTranscriptionScript(ctx, url)
-	if err != nil {
-		// Use a new context for the delete operation to avoid context cancellation issues
-		deleteCtx, deleteCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer deleteCancel()
-		if deleteErr := deleteTranscription(deleteCtx, url); deleteErr != nil {
-			log.Printf("Error removing transcription: %v", deleteErr)
-		}
-		return "", err
-	}
-
-	err = setTranscription(ctx, url, text)
-	if err != nil {
-		return "", fmt.Errorf("error saving transcription: %v", err)
-	}
-
 	return text, nil
 }
 
