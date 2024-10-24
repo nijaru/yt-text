@@ -194,6 +194,7 @@ func runTranscriptionScript(url string) (string, error) {
 		return "", fmt.Errorf("Error transcribing")
 	}
 
+	log.Printf("Transcription for URL %s completed.", url)
 	return text, nil
 }
 
