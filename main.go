@@ -90,6 +90,7 @@ func setTranscription(url, text string) error {
 }
 
 func transcribeHandler(w http.ResponseWriter, r *http.Request) {
+	log.Printf("Received request: %s %s", r.Method, r.URL.Path)
 	if r.Method != http.MethodPost {
 		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
 		return
@@ -162,6 +163,7 @@ func runTranscriptionScript(url string) (string, error) {
 }
 
 func serveIndex(w http.ResponseWriter, r *http.Request) {
+	log.Printf("Serving index.html for request: %s %s", r.Method, r.URL.Path)
 	http.ServeFile(w, r, "./static/index.html")
 }
 
@@ -184,6 +186,7 @@ func main() {
 	}
 
 	go func() {
+		log.Println("Listening on port 8080")
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("Could not listen on :8080: %v\n", err)
 		}
