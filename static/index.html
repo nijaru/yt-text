@@ -1,11 +1,4 @@
-<script>
-document.addEventListener('DOMContentLoaded', function() {
-    const submitButton = document.querySelector('button[type="submit"]');
-    submitButton.addEventListener('click', function(event) {
-        submitButton.disabled = true;
-    });
-});
-</script><!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -22,14 +15,15 @@ document.addEventListener('DOMContentLoaded', function() {
             <button type="submit" class="bg-blue-500 text-white px-4 py-2 rounded">Submit</button>
         </form>
         <div id="response" class="mt-4"></div>
+        <button id="copyButton" class="bg-yellow-500 text-white px-4 py-2 rounded mt-4 hidden">Copy to Clipboard</button>
         <button id="downloadButton" class="bg-green-500 text-white px-4 py-2 rounded mt-4 hidden">Download as Text File</button>
     </div>
     <script>
         document.getElementById('transcriptionForm').addEventListener('submit', function(event) {
             event.preventDefault();
             const submitButton = document.querySelector('button[type="submit"]');
-            submitButton.disabled = true;
             document.getElementById('response').innerText = ''; // Clear response
+            document.getElementById('copyButton').classList.add('hidden'); // Hide copy button
             document.getElementById('downloadButton').classList.add('hidden'); // Hide download button
             const url = document.getElementById('url').value;
             fetch('/transcribe', {
@@ -50,15 +44,16 @@ document.addEventListener('DOMContentLoaded', function() {
             .then(data => {
                 const responseDiv = document.getElementById('response');
                 responseDiv.innerText = data.transcription;
-                responseDiv.style.cursor = 'pointer';
-                responseDiv.title = 'Click to copy';
-                responseDiv.addEventListener('click', function() {
+
+                const copyButton = document.getElementById('copyButton');
+                copyButton.classList.remove('hidden'); // Show copy button
+                copyButton.onclick = function() {
                     navigator.clipboard.writeText(data.transcription).then(() => {
                         alert('Text copied to clipboard');
                     }).catch(err => {
                         alert('Failed to copy text: ' + err);
                     });
-                });
+                };
 
                 const downloadButton = document.getElementById('downloadButton');
                 downloadButton.classList.remove('hidden'); // Show download button
@@ -76,6 +71,7 @@ document.addEventListener('DOMContentLoaded', function() {
             .finally(() => {
                 submitButton.disabled = false;
             });
+            submitButton.disabled = true; // Disable the button after sending the request
         });
     </script>
 </body>
