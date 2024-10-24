@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -15,37 +14,13 @@ import (
 	"syscall"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
+	"github.com/nijaru/yt-text/config"
+	"github.com/nijaru/yt-text/db"
+
+	"github.com/google/uuid"
 )
 
-var db *sql.DB
-
-func initializeDB() error {
-	log.Println("Initializing database")
-
-	var err error
-	db, err = sql.Open("sqlite3", "./urls.db")
-	if err != nil {
-		return fmt.Errorf("error opening database: %v", err)
-	}
-
-	// Set connection pool settings
-	db.SetMaxOpenConns(10)
-	db.SetMaxIdleConns(5)
-	db.SetConnMaxLifetime(30 * time.Minute)
-
-	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS urls (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        url TEXT NOT NULL UNIQUE,
-                        text TEXT,
-                        status TEXT NOT NULL DEFAULT 'pending'
-    )`)
-	if err != nil {
-		return fmt.Errorf("error creating table: %v", err)
-	}
-
-	return nil
-}
+var cfg *config.Config
 
 func validateURL(rawURL string) error {
 	if rawURL == "" {
@@ -66,69 +41,6 @@ func validateURL(rawURL string) error {
 	return nil
 }
 
-func getTranscription(ctx context.Context, url string) (string, string, error) {
-	var text sql.NullString
-	var status string
-	err := db.QueryRowContext(ctx, "SELECT text, status FROM urls WHERE url = ?", url).Scan(&text, &status)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return "", "pending", nil
-		}
-		return "", "", fmt.Errorf("error querying database: %v", err)
-	}
-
-	if !text.Valid {
-		return "", status, nil
-	}
-
-	return text.String, status, nil
-}
-
-func setTranscription(ctx context.Context, url, text string) error {
-	stmt, err := db.PrepareContext(ctx, "INSERT INTO urls (url, text, status) VALUES (?, ?, 'completed') ON CONFLICT(url) DO UPDATE SET text=excluded.text, status='completed'")
-	if err != nil {
-		return fmt.Errorf("error preparing statement: %v", err)
-	}
-	defer stmt.Close()
-
-	_, err = stmt.ExecContext(ctx, url, text)
-	if err != nil {
-		return fmt.Errorf("error executing statement: %v", err)
-	}
-
-	return nil
-}
-
-func setTranscriptionStatus(ctx context.Context, url, status string) error {
-	stmt, err := db.PrepareContext(ctx, "UPDATE urls SET status = ? WHERE url = ?")
-	if err != nil {
-		return fmt.Errorf("error preparing statement: %v", err)
-	}
-	defer stmt.Close()
-
-	_, err = stmt.ExecContext(ctx, status, url)
-	if err != nil {
-		return fmt.Errorf("error executing statement: %v", err)
-	}
-
-	return nil
-}
-
-func deleteTranscription(ctx context.Context, url string) error {
-	stmt, err := db.PrepareContext(ctx, "DELETE FROM urls WHERE url = ?")
-	if err != nil {
-		return fmt.Errorf("error preparing delete statement: %v", err)
-	}
-	defer stmt.Close()
-
-	_, err = stmt.ExecContext(ctx, url)
-	if err != nil {
-		return fmt.Errorf("error executing delete statement: %v", err)
-	}
-
-	return nil
-}
-
 func transcribeHandler(w http.ResponseWriter, r *http.Request) {
 	log.Printf("Received request: %s %s", r.Method, r.URL.Path)
 	if r.Method != http.MethodPost {
@@ -143,10 +55,12 @@ func transcribeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
+	requestID := uuid.New().String()
+
+	ctx, cancel := context.WithTimeout(r.Context(), cfg.TranscribeTimeout)
 	defer cancel()
 
-	text, err := handleTranscription(ctx, url)
+	text, err := handleTranscription(ctx, requestID, url)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		log.Println(err)
@@ -156,20 +70,20 @@ func transcribeHandler(w http.ResponseWriter, r *http.Request) {
 	sendJSONResponse(w, text)
 }
 
-func handleTranscription(ctx context.Context, url string) (string, error) {
-	text, status, err := getTranscription(ctx, url)
+func handleTranscription(ctx context.Context, requestID, url string) (string, error) {
+	text, status, err := db.GetTranscription(ctx, requestID)
 	if err != nil {
 		return "", err
 	}
 
 	if status == "completed" {
-		log.Printf("Transcription for URL %s found in database.", url)
+		log.Printf("Transcription for request ID %s found in database.", requestID)
 		return text, nil
 	}
 
 	if status == "in_progress" {
-		log.Printf("Transcription for URL %s is in progress. Waiting for it to be processed...", url)
-		text, err = waitForTranscription(ctx, url)
+		log.Printf("Transcription for request ID %s is in progress. Waiting for it to be processed...", requestID)
+		text, err = waitForTranscription(ctx, requestID)
 		if err != nil {
 			return "", err
 		}
@@ -179,28 +93,28 @@ func handleTranscription(ctx context.Context, url string) (string, error) {
 	}
 
 	if status == "pending" {
-		log.Printf("Transcription for URL %s not found in database. Proceeding to transcribe...", url)
-		if err := setTranscriptionStatus(ctx, url, "in_progress"); err != nil {
+		log.Printf("Transcription for request ID %s not found in database. Proceeding to transcribe...", requestID)
+		if err := db.SetTranscriptionStatus(ctx, requestID, "in_progress"); err != nil {
 			return "", fmt.Errorf("error setting transcription status: %v", err)
 		}
 	}
 
 	text, err = runTranscriptionScript(ctx, url)
 	if err != nil {
-		setTranscriptionStatus(ctx, url, "failed")
+		db.SetTranscriptionStatus(ctx, requestID, "failed")
 		return "", err
 	}
 
-	err = setTranscription(ctx, url, text)
+	err = db.SetTranscription(ctx, requestID, url, text)
 	if err != nil {
 		return "", fmt.Errorf("error saving transcription: %v", err)
 	}
 
-	setTranscriptionStatus(ctx, url, "completed")
+	db.SetTranscriptionStatus(ctx, requestID, "completed")
 	return text, nil
 }
 
-func waitForTranscription(ctx context.Context, url string) (string, error) {
+func waitForTranscription(ctx context.Context, requestID string) (string, error) {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
@@ -209,16 +123,16 @@ func waitForTranscription(ctx context.Context, url string) (string, error) {
 		case <-ctx.Done():
 			return "", ctx.Err()
 		case <-ticker.C:
-			text, status, err := getTranscription(ctx, url)
+			text, status, err := db.GetTranscription(ctx, requestID)
 			if err != nil {
 				return "", err
 			}
 			if status == "completed" {
-				log.Printf("Transcription for URL %s found in database.", url)
+				log.Printf("Transcription for request ID %s found in database.", requestID)
 				return text, nil
 			}
 			if status == "failed" {
-				return "", fmt.Errorf("transcription failed for URL %s", url)
+				return "", fmt.Errorf("transcription failed for request ID %s", requestID)
 			}
 		}
 	}
@@ -235,6 +149,7 @@ func runTranscriptionScript(ctx context.Context, url string) (string, error) {
 	cmd := exec.CommandContext(ctx, "uv", "run", "transcribe.py", url)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
+		log.Printf("Error running transcription script: %v, output: %s", err, output)
 		return "", fmt.Errorf("error transcribing: %v, output: %s", err, output)
 	}
 
@@ -248,10 +163,12 @@ func runTranscriptionScript(ctx context.Context, url string) (string, error) {
 
 	fileContent, err := os.ReadFile(filename)
 	if err != nil {
+		log.Printf("Error reading file: %v", err)
 		return "", fmt.Errorf("error reading file: %v", err)
 	}
 	text := string(fileContent)
 	if text == "" {
+		log.Printf("Transcription resulted in empty text for URL: %s", url)
 		return "", fmt.Errorf("error transcribing")
 	}
 
@@ -265,26 +182,28 @@ func serveIndex(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	err := initializeDB()
+	cfg = config.LoadConfig()
+
+	err := db.InitializeDB(cfg.DBPath)
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer db.Close()
+	defer db.DB.Close()
 
 	http.HandleFunc("/", serveIndex)
 	http.HandleFunc("/transcribe", transcribeHandler)
 
 	server := &http.Server{
-		Addr:         ":8080",
-		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 10 * time.Second,
-		IdleTimeout:  30 * time.Second,
+		Addr:         ":" + cfg.ServerPort,
+		ReadTimeout:  cfg.ReadTimeout,
+		WriteTimeout: cfg.WriteTimeout,
+		IdleTimeout:  cfg.IdleTimeout,
 	}
 
 	go func() {
-		log.Println("Listening on port 8080")
+		log.Printf("Listening on port %s", cfg.ServerPort)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Could not listen on :8080: %v\n", err)
+			log.Fatalf("Could not listen on :%s: %v\n", cfg.ServerPort, err)
 		}
 	}()
 

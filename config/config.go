@@ -22,7 +22,7 @@ func LoadConfig() *Config {
 		ReadTimeout:       getEnvAsDuration("READ_TIMEOUT", 10*time.Second),
 		WriteTimeout:      getEnvAsDuration("WRITE_TIMEOUT", 10*time.Second),
 		IdleTimeout:       getEnvAsDuration("IDLE_TIMEOUT", 30*time.Second),
-		TranscribeTimeout: getEnvAsDuration("TRANSCRIBE_TIMEOUT", 2*time.Minute),
+		TranscribeTimeout: getEnvAsDuration("TRANSCRIBE_TIMEOUT", 5*time.Minute),
 	}
 }
 
