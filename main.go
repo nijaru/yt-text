@@ -53,18 +53,14 @@ func validateURL(rawURL string) error {
 		return fmt.Errorf("error: URL must start with http or https")
 	}
 
-	// Additional validation to ensure it's a YouTube URL
-	if !strings.Contains(parsedURL.Host, "youtube.com") && !strings.Contains(parsedURL.Host, "youtu.be") {
-		return fmt.Errorf("error: URL must be a YouTube link")
-	}
-
 	return nil
 }
 
 func transcribeHandler(w http.ResponseWriter, r *http.Request) {
-	log.Printf("Received request: %s %s", r.Method, r.URL.Path)
+	log.Printf("INFO: Received request: %s %s", r.Method, r.URL.Path)
 	if r.Method != http.MethodPost {
 		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
+		log.Printf("ERROR: Invalid request method: %s", r.Method)
 		return
 	}
 
@@ -72,11 +68,13 @@ func transcribeHandler(w http.ResponseWriter, r *http.Request) {
 
 	if err := validateURL(url); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
+		log.Printf("ERROR: URL validation failed: %v", err)
 		return
 	}
 
 	if !rateLimiter.Allow() {
 		http.Error(w, "Rate limit exceeded", http.StatusTooManyRequests)
+		log.Printf("ERROR: Rate limit exceeded for URL: %s", url)
 		return
 	}
 
@@ -86,11 +84,12 @@ func transcribeHandler(w http.ResponseWriter, r *http.Request) {
 	text, err := handleTranscription(ctx, url)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
-		log.Println(err)
+		log.Printf("ERROR: Transcription failed for URL %s: %v", url, err)
 		return
 	}
 
 	sendJSONResponse(w, text)
+	log.Printf("INFO: Transcription successful for URL: %s", url)
 }
 
 func handleTranscription(ctx context.Context, url string) (string, error) {
@@ -100,41 +99,47 @@ func handleTranscription(ctx context.Context, url string) (string, error) {
 
 	text, status, err := db.GetTranscription(ctx, url)
 	if err != nil {
+		log.Printf("ERROR: Failed to get transcription from DB for URL %s: %v", url, err)
 		return "", err
 	}
 
 	if status == "completed" {
-		log.Printf("Transcription for URL %s found in database.", url)
+		log.Printf("INFO: Transcription for URL %s found in database.", url)
 		return text, nil
 	}
 
 	err = db.SetTranscriptionStatus(ctx, url, "in_progress")
 	if err != nil {
+		log.Printf("ERROR: Failed to set transcription status to in_progress for URL %s: %v", url, err)
 		return "", fmt.Errorf("error setting transcription status: %v", err)
 	}
 
 	text, err = runTranscriptionScript(ctx, url)
 	if err != nil {
 		db.SetTranscriptionStatus(ctx, url, "failed")
+		log.Printf("ERROR: Transcription script failed for URL %s: %v", url, err)
 		return "", err
 	}
 
 	err = db.SetTranscription(ctx, url, text)
 	if err != nil {
+		log.Printf("ERROR: Failed to save transcription for URL %s: %v", url, err)
 		return "", fmt.Errorf("error saving transcription: %v", err)
 	}
 
 	db.SetTranscriptionStatus(ctx, url, "completed")
+	log.Printf("INFO: Transcription for URL %s saved successfully.", url)
 	return text, nil
 }
 
 func sendJSONResponse(w http.ResponseWriter, text string) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"transcription": text})
+	log.Printf("INFO: JSON response sent successfully.")
 }
 
 func runTranscriptionScript(ctx context.Context, url string) (string, error) {
-	log.Printf("Transcribing URL: %s", url)
+	log.Printf("INFO: Starting transcription for URL: %s", url)
 
 	const (
 		maxRetries    = 3
@@ -155,7 +160,7 @@ func runTranscriptionScript(ctx context.Context, url string) (string, error) {
 			break
 		}
 
-		log.Printf("Error running transcription script (attempt %d/%d): %v, output: %s", attempt, maxRetries, err, output)
+		log.Printf("ERROR: Transcription script failed (attempt %d/%d) for URL %s: %v, output: %s", attempt, maxRetries, url, err, output)
 
 		backoff := time.Duration(float64(initialBackoff) * math.Pow(backoffFactor, float64(attempt-1)))
 		if backoff > maxBackoff {
@@ -166,11 +171,13 @@ func runTranscriptionScript(ctx context.Context, url string) (string, error) {
 		case <-time.After(backoff + time.Duration(rand.Int63n(int64(backoff/2)))):
 			// Continue to the next retry attempt
 		case <-ctx.Done():
+			log.Printf("ERROR: Context cancelled during transcription for URL %s: %v", url, ctx.Err())
 			return "", ctx.Err()
 		}
 	}
 
 	if err != nil {
+		log.Printf("ERROR: Transcription failed after %d attempts for URL %s: %v, output: %s", maxRetries, url, err, output)
 		return "", fmt.Errorf("error transcribing after %d attempts: %v, output: %s", maxRetries, err, output)
 	}
 
@@ -178,27 +185,27 @@ func runTranscriptionScript(ctx context.Context, url string) (string, error) {
 	filename := lines[len(lines)-1]
 	defer func() {
 		if err := os.Remove(filename); err != nil {
-			log.Printf("Error removing file: %v", err)
+			log.Printf("ERROR: Failed to remove file %s: %v", filename, err)
 		}
 	}()
 
 	fileContent, err := os.ReadFile(filename)
 	if err != nil {
-		log.Printf("Error reading file: %v", err)
+		log.Printf("ERROR: Failed to read file %s: %v", filename, err)
 		return "", fmt.Errorf("error reading file: %v", err)
 	}
 	text := string(fileContent)
 	if text == "" {
-		log.Printf("Transcription resulted in empty text for URL: %s", url)
+		log.Printf("ERROR: Transcription resulted in empty text for URL: %s", url)
 		return "", fmt.Errorf("error transcribing")
 	}
 
-	log.Printf("Transcription for URL %s completed.", url)
+	log.Printf("INFO: Transcription for URL %s completed successfully.", url)
 	return text, nil
 }
 
 func serveIndex(w http.ResponseWriter, r *http.Request) {
-	log.Printf("Serving index.html for request: %s %s", r.Method, r.URL.Path)
+	log.Printf("INFO: Serving index.html for request: %s %s", r.Method, r.URL.Path)
 	http.ServeFile(w, r, "./static/index.html")
 }
 
@@ -206,16 +213,16 @@ func main() {
 	cfg = config.LoadConfig()
 
 	if err := validateConfig(cfg); err != nil {
-		log.Fatalf("Invalid configuration: %v", err)
+		log.Fatalf("FATAL: Invalid configuration: %v", err)
 	}
 
 	err := db.InitializeDB(cfg.DBPath)
 	if err != nil {
-		log.Fatalf("Failed to initialize database: %v", err)
+		log.Fatalf("FATAL: Failed to initialize database: %v", err)
 	}
 	defer func() {
 		if err := db.DB.Close(); err != nil {
-			log.Printf("Error closing database: %v", err)
+			log.Printf("ERROR: Failed to close database: %v", err)
 		}
 	}()
 
@@ -233,9 +240,9 @@ func main() {
 	}
 
 	go func() {
-		log.Printf("Listening on port %s", cfg.ServerPort)
+		log.Printf("INFO: Listening on port %s", cfg.ServerPort)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Could not listen on :%s: %v\n", cfg.ServerPort, err)
+			log.Fatalf("FATAL: Could not listen on :%s: %v", cfg.ServerPort, err)
 		}
 	}()
 
@@ -245,12 +252,12 @@ func main() {
 
 	<-stop
 
-	log.Println("Shutting down the server...")
+	log.Println("INFO: Shutting down the server...")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	if err := server.Shutdown(ctx); err != nil {
-		log.Fatalf("Server Shutdown: %v", err)
+		log.Fatalf("FATAL: Server Shutdown: %v", err)
 	}
 }
 
