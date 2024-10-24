@@ -28,6 +28,15 @@ var (
 	rateLimiter       *rate.Limiter
 )
 
+type transcriptionLock struct {
+	mu sync.Mutex
+}
+
+func getTranscriptionLock(url string) *transcriptionLock {
+	lock, _ := transcriptionLocks.LoadOrStore(url, &transcriptionLock{})
+	return lock.(*transcriptionLock)
+}
+
 func validateURL(rawURL string) error {
 	if rawURL == "" {
 		return fmt.Errorf("error: URL is required")
@@ -85,13 +94,10 @@ func transcribeHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleTranscription(ctx context.Context, url string) (string, error) {
-	if _, loaded := transcriptionLocks.LoadOrStore(url, struct{}{}); loaded {
-		// Another transcription is already in progress for this URL
-		return waitForTranscription(ctx, url)
-	}
-	defer transcriptionLocks.Delete(url) // Ensure the lock is released after transcription
+	lock := getTranscriptionLock(url)
+	lock.mu.Lock()
+	defer lock.mu.Unlock()
 
-	// Proceed with transcription logic
 	text, status, err := db.GetTranscription(ctx, url)
 	if err != nil {
 		return "", err
@@ -102,22 +108,9 @@ func handleTranscription(ctx context.Context, url string) (string, error) {
 		return text, nil
 	}
 
-	if status == "in_progress" {
-		log.Printf("Transcription for URL %s is in progress. Waiting for it to be processed...", url)
-		text, err = waitForTranscription(ctx, url)
-		if err != nil {
-			return "", err
-		}
-		if text != "" {
-			return text, nil
-		}
-	}
-
-	if status == "pending" {
-		log.Printf("Transcription for URL %s not found in database. Proceeding to transcribe...", url)
-		if err := db.SetTranscriptionStatus(ctx, url, "in_progress"); err != nil {
-			return "", fmt.Errorf("error setting transcription status: %v", err)
-		}
+	err = db.SetTranscriptionStatus(ctx, url, "in_progress")
+	if err != nil {
+		return "", fmt.Errorf("error setting transcription status: %v", err)
 	}
 
 	text, err = runTranscriptionScript(ctx, url)
@@ -133,30 +126,6 @@ func handleTranscription(ctx context.Context, url string) (string, error) {
 
 	db.SetTranscriptionStatus(ctx, url, "completed")
 	return text, nil
-}
-
-func waitForTranscription(ctx context.Context, url string) (string, error) {
-	ticker := time.NewTicker(5 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return "", ctx.Err()
-		case <-ticker.C:
-			text, status, err := db.GetTranscription(ctx, url)
-			if err != nil {
-				return "", err
-			}
-			if status == "completed" {
-				log.Printf("Transcription for URL %s found in database.", url)
-				return text, nil
-			}
-			if status == "failed" {
-				return "", fmt.Errorf("transcription failed for URL %s", url)
-			}
-		}
-	}
 }
 
 func sendJSONResponse(w http.ResponseWriter, text string) {
