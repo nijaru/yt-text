@@ -25,6 +25,11 @@ func initializeDB() error {
 		return fmt.Errorf("Error opening database: %v", err)
 	}
 
+	// Set connection pool settings
+	db.SetMaxOpenConns(10)
+	db.SetMaxIdleConns(5)
+	db.SetConnMaxLifetime(30 * time.Minute)
+
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS urls (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         url TEXT NOT NULL,
@@ -70,9 +75,15 @@ func getTranscription(url string) (string, error) {
 }
 
 func setTranscription(url, text string) error {
-	_, err := db.Exec("INSERT INTO urls (url, text) VALUES (?, ?)", url, text)
+	stmt, err := db.Prepare("INSERT INTO urls (url, text) VALUES (?, ?)")
 	if err != nil {
-		return fmt.Errorf("Error inserting into database: %v", err)
+		return fmt.Errorf("Error preparing statement: %v", err)
+	}
+	defer stmt.Close()
+
+	_, err = stmt.Exec(url, text)
+	if err != nil {
+		return fmt.Errorf("Error executing statement: %v", err)
 	}
 
 	return nil
@@ -132,23 +143,26 @@ func runTranscriptionScript(url string) (string, error) {
 
 	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
 	filename := lines[len(lines)-1]
+	defer func() {
+		if err := os.Remove(filename); err != nil {
+			log.Printf("Error removing file: %v", err)
+		}
+	}()
 
 	fileContent, err := os.ReadFile(filename)
 	if err != nil {
 		return "", fmt.Errorf("Error reading file: %v", err)
 	}
-	
-	err = os.Remove(filename)
-	if err != nil {
-	    return "", fmt.Errorf("Error deleting file: %v", err)
-	}
-	
 	text := string(fileContent)
 	if text == "" {
 		return "", fmt.Errorf("Error transcribing")
 	}
 
 	return text, nil
+}
+
+func serveIndex(w http.ResponseWriter, r *http.Request) {
+	http.ServeFile(w, r, "./static/index.html")
 }
 
 func main() {
@@ -158,9 +172,7 @@ func main() {
 	}
 	defer db.Close()
 
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		http.ServeFile(w, r, "index.html")
-	})
+	http.HandleFunc("/", serveIndex)
 
 	http.HandleFunc("/transcribe", transcribeHandler)
 
