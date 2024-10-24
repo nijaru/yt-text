@@ -28,7 +28,6 @@ func InitializeDB(dbPath string) error {
 
 	_, err = DB.Exec(`CREATE TABLE IF NOT EXISTS urls (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        request_id TEXT NOT NULL UNIQUE,
                         url TEXT NOT NULL UNIQUE,
                         text TEXT,
                         status TEXT NOT NULL DEFAULT 'pending'
@@ -41,10 +40,10 @@ func InitializeDB(dbPath string) error {
 	return nil
 }
 
-func GetTranscription(ctx context.Context, requestID string) (string, string, error) {
+func GetTranscription(ctx context.Context, url string) (string, string, error) {
 	var text sql.NullString
 	var status string
-	err := DB.QueryRowContext(ctx, "SELECT text, status FROM urls WHERE request_id = ?", requestID).Scan(&text, &status)
+	err := DB.QueryRowContext(ctx, "SELECT text, status FROM urls WHERE url = ?", url).Scan(&text, &status)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return "", "pending", nil
@@ -59,14 +58,14 @@ func GetTranscription(ctx context.Context, requestID string) (string, string, er
 	return text.String, status, nil
 }
 
-func SetTranscription(ctx context.Context, requestID, url, text string) error {
-	stmt, err := DB.PrepareContext(ctx, "INSERT INTO urls (request_id, url, text, status) VALUES (?, ?, ?, 'completed') ON CONFLICT(request_id) DO UPDATE SET text=excluded.text, status='completed'")
+func SetTranscription(ctx context.Context, url, text string) error {
+	stmt, err := DB.PrepareContext(ctx, "INSERT INTO urls (url, text, status) VALUES (?, ?, 'completed') ON CONFLICT(url) DO UPDATE SET text=excluded.text, status='completed'")
 	if err != nil {
 		return fmt.Errorf("error preparing statement: %v", err)
 	}
 	defer stmt.Close()
 
-	_, err = stmt.ExecContext(ctx, requestID, url, text)
+	_, err = stmt.ExecContext(ctx, url, text)
 	if err != nil {
 		return fmt.Errorf("error executing statement: %v", err)
 	}
@@ -74,14 +73,14 @@ func SetTranscription(ctx context.Context, requestID, url, text string) error {
 	return nil
 }
 
-func SetTranscriptionStatus(ctx context.Context, requestID, status string) error {
-	stmt, err := DB.PrepareContext(ctx, "UPDATE urls SET status = ? WHERE request_id = ?")
+func SetTranscriptionStatus(ctx context.Context, url, status string) error {
+	stmt, err := DB.PrepareContext(ctx, "UPDATE urls SET status = ? WHERE url = ?")
 	if err != nil {
 		return fmt.Errorf("error preparing statement: %v", err)
 	}
 	defer stmt.Close()
 
-	_, err = stmt.ExecContext(ctx, status, requestID)
+	_, err = stmt.ExecContext(ctx, status, url)
 	if err != nil {
 		return fmt.Errorf("error executing statement: %v", err)
 	}
@@ -89,14 +88,14 @@ func SetTranscriptionStatus(ctx context.Context, requestID, status string) error
 	return nil
 }
 
-func DeleteTranscription(ctx context.Context, requestID string) error {
-	stmt, err := DB.PrepareContext(ctx, "DELETE FROM urls WHERE request_id = ?")
+func DeleteTranscription(ctx context.Context, url string) error {
+	stmt, err := DB.PrepareContext(ctx, "DELETE FROM urls WHERE url = ?")
 	if err != nil {
 		return fmt.Errorf("error preparing delete statement: %v", err)
 	}
 	defer stmt.Close()
 
-	_, err = stmt.ExecContext(ctx, requestID)
+	_, err = stmt.ExecContext(ctx, url)
 	if err != nil {
 		return fmt.Errorf("error executing delete statement: %v", err)
 	}

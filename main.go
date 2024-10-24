@@ -11,16 +11,18 @@ import (
 	"os/exec"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/nijaru/yt-text/config"
 	"github.com/nijaru/yt-text/db"
-
-	"github.com/google/uuid"
 )
 
-var cfg *config.Config
+var (
+	cfg               *config.Config
+	transcriptionLocks sync.Map
+)
 
 func validateURL(rawURL string) error {
 	if rawURL == "" {
@@ -36,6 +38,11 @@ func validateURL(rawURL string) error {
 
 	if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
 		return fmt.Errorf("error: URL must start with http or https")
+	}
+
+	// Additional validation to ensure it's a YouTube URL
+	if !strings.Contains(parsedURL.Host, "youtube.com") && !strings.Contains(parsedURL.Host, "youtu.be") {
+		return fmt.Errorf("error: URL must be a YouTube link")
 	}
 
 	return nil
@@ -55,12 +62,10 @@ func transcribeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	requestID := uuid.New().String()
-
 	ctx, cancel := context.WithTimeout(r.Context(), cfg.TranscribeTimeout)
 	defer cancel()
 
-	text, err := handleTranscription(ctx, requestID, url)
+	text, err := handleTranscription(ctx, url)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		log.Println(err)
@@ -70,20 +75,27 @@ func transcribeHandler(w http.ResponseWriter, r *http.Request) {
 	sendJSONResponse(w, text)
 }
 
-func handleTranscription(ctx context.Context, requestID, url string) (string, error) {
-	text, status, err := db.GetTranscription(ctx, requestID)
+func handleTranscription(ctx context.Context, url string) (string, error) {
+	if _, loaded := transcriptionLocks.LoadOrStore(url, struct{}{}); loaded {
+		// Another transcription is already in progress for this URL
+		return waitForTranscription(ctx, url)
+	}
+	defer transcriptionLocks.Delete(url) // Ensure the lock is released after transcription
+
+	// Proceed with transcription logic
+	text, status, err := db.GetTranscription(ctx, url)
 	if err != nil {
 		return "", err
 	}
 
 	if status == "completed" {
-		log.Printf("Transcription for request ID %s found in database.", requestID)
+		log.Printf("Transcription for URL %s found in database.", url)
 		return text, nil
 	}
 
 	if status == "in_progress" {
-		log.Printf("Transcription for request ID %s is in progress. Waiting for it to be processed...", requestID)
-		text, err = waitForTranscription(ctx, requestID)
+		log.Printf("Transcription for URL %s is in progress. Waiting for it to be processed...", url)
+		text, err = waitForTranscription(ctx, url)
 		if err != nil {
 			return "", err
 		}
@@ -93,28 +105,28 @@ func handleTranscription(ctx context.Context, requestID, url string) (string, er
 	}
 
 	if status == "pending" {
-		log.Printf("Transcription for request ID %s not found in database. Proceeding to transcribe...", requestID)
-		if err := db.SetTranscriptionStatus(ctx, requestID, "in_progress"); err != nil {
+		log.Printf("Transcription for URL %s not found in database. Proceeding to transcribe...", url)
+		if err := db.SetTranscriptionStatus(ctx, url, "in_progress"); err != nil {
 			return "", fmt.Errorf("error setting transcription status: %v", err)
 		}
 	}
 
 	text, err = runTranscriptionScript(ctx, url)
 	if err != nil {
-		db.SetTranscriptionStatus(ctx, requestID, "failed")
+		db.SetTranscriptionStatus(ctx, url, "failed")
 		return "", err
 	}
 
-	err = db.SetTranscription(ctx, requestID, url, text)
+	err = db.SetTranscription(ctx, url, text)
 	if err != nil {
 		return "", fmt.Errorf("error saving transcription: %v", err)
 	}
 
-	db.SetTranscriptionStatus(ctx, requestID, "completed")
+	db.SetTranscriptionStatus(ctx, url, "completed")
 	return text, nil
 }
 
-func waitForTranscription(ctx context.Context, requestID string) (string, error) {
+func waitForTranscription(ctx context.Context, url string) (string, error) {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
@@ -123,16 +135,16 @@ func waitForTranscription(ctx context.Context, requestID string) (string, error)
 		case <-ctx.Done():
 			return "", ctx.Err()
 		case <-ticker.C:
-			text, status, err := db.GetTranscription(ctx, requestID)
+			text, status, err := db.GetTranscription(ctx, url)
 			if err != nil {
 				return "", err
 			}
 			if status == "completed" {
-				log.Printf("Transcription for request ID %s found in database.", requestID)
+				log.Printf("Transcription for URL %s found in database.", url)
 				return text, nil
 			}
 			if status == "failed" {
-				return "", fmt.Errorf("transcription failed for request ID %s", requestID)
+				return "", fmt.Errorf("transcription failed for URL %s", url)
 			}
 		}
 	}
