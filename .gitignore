@@ -163,3 +163,22 @@ cython_debug/
 
 # sqlite database files
 *.db
+
+# Go build artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+
+# Go vendor directory
+/vendor/
+
+# Go modules
+/go.sum
+/go.work
+/go.work.sum
+
+# Go coverage
+*.out
