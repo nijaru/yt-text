@@ -19,6 +19,8 @@ import (
 var db *sql.DB
 
 func initializeDB() error {
+	log.Println("Initializing database")
+
 	var err error
 	db, err = sql.Open("sqlite3", "./urls.db")
 	if err != nil {
@@ -61,17 +63,20 @@ func validateURL(rawURL string) error {
 	return nil
 }
 
-func getTranscription(url string) (string, error) {
+func getTranscription(url string) (string, bool, error) {
 	var body string
 	err := db.QueryRow("SELECT text FROM urls WHERE url = ?", url).Scan(&body)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return "", nil
+			if err := setTranscription(url, ""); err != nil {
+				return "", false, fmt.Errorf("Error inserting empty transcription: %v", err)
+			}
+			return "", false, nil
 		}
-		return "", fmt.Errorf("Error querying database: %v", err)
+		return "", false, fmt.Errorf("Error querying database: %v", err)
 	}
 
-	return body, nil
+	return body, true, nil
 }
 
 func setTranscription(url, text string) error {
@@ -103,17 +108,45 @@ func transcribeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	text, err := getTranscription(url)
+	text, found, err := getTranscription(url)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		log.Println(err)
 		return
 	}
 	if text != "" {
+		log.Printf("Transcription for URL %s found in database.", url)
 		sendJSONResponse(w, text)
 		return
 	}
 
+	// if transcription already in progress
+	if found {
+		log.Printf("Transcription for URL %s not found in database. Waiting for it to be processed...", url)
+		timeout := time.After(1 * time.Minute)
+		tick := time.Tick(5 * time.Second)
+
+		for {
+			select {
+			case <-timeout:
+				log.Printf("Timeout waiting for transcription for URL %s. Proceeding to transcribe...", url)
+				break
+			case <-tick:
+				text, found, err = getTranscription(url)
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					log.Println(err)
+					return
+				}
+				if text != "" {
+					log.Printf("Transcription for URL %s found in database.", url)
+					sendJSONResponse(w, text)
+					return
+				}
+			}
+		}
+	}
+	
 	text, err = runTranscriptionScript(url)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -136,7 +169,9 @@ func sendJSONResponse(w http.ResponseWriter, text string) {
 }
 
 func runTranscriptionScript(url string) (string, error) {
-	cmd := exec.Command("python3", "transcribe.py", url)
+	log.Printf("Transcribing URL: %s", url)
+
+	cmd := exec.Command("uv", "run", "transcribe.py", url)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("Error transcribing: %v, Output: %s", err, output)
