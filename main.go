@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"net/url"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -30,21 +31,22 @@ func initializeDB() error {
 	return nil
 }
 
-func validateURL(url string) error {
-	// check if URL is empty
-	if url == "" {
+func validateURL(rawURL string) error {
+	if rawURL == "" {
 		return fmt.Errorf("Error: URL is required")
 	}
 
-	// check for sql injection
-	if strings.Contains(url, "'") || strings.Contains(url, ";") {
-		return fmt.Errorf("Error: Invalid URL format")
-	}
+	rawURL = strings.TrimSpace(rawURL)
 
-	_, err := http.NewRequest("GET", url, nil)
+	parsedURL, err := url.ParseRequestURI(rawURL)
 	if err != nil {
 		return fmt.Errorf("Error: Invalid URL format")
 	}
+
+	if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
+		return fmt.Errorf("Error: URL must start with http or https")
+	}
+
 	return nil
 }
 
@@ -91,30 +93,48 @@ func transcribeHandler(w http.ResponseWriter, r *http.Request) {
 	url := r.FormValue("url")
 
 	// validate URL
-	err := validateURL(url)
-	if err != nil {
+	if err := validateURL(url); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	// check for transcription in database
+	// check db
 	text, err := getTranscription(url)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	if text != "" {
-		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintf(w, `{"transcription": "%s"}`, text)
+		sendJSONResponse(w, text)
 		return
 	}
 
-	// run python script to transcribe
+	// transcribe
+	text, err = runTranscriptionScript(url)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// save to db
+	if err := setTranscription(url, text); err != nil {
+		http.Error(w, fmt.Sprintf("Error saving transcription: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	sendJSONResponse(w, text)
+}
+
+func sendJSONResponse(w http.ResponseWriter, text string) {
+	w.Header().Set("Content-Type", "application/json")
+	fmt.Fprintf(w, `{"transcription": "%s"}`, text)
+}
+
+func runTranscriptionScript(url string) (string, error) {
 	cmd := exec.Command("python3", "transcribe.py", url)
 	output, err := cmd.CombinedOutput() // Use CombinedOutput to capture stderr as well
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Error transcribing: %v, Output: %s", err, output), http.StatusInternalServerError)
-		return
+		return "", fmt.Errorf("Error transcribing: %v, Output: %s", err, output)
 	}
 
 	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
@@ -122,23 +142,14 @@ func transcribeHandler(w http.ResponseWriter, r *http.Request) {
 
 	fileContent, err := os.ReadFile(filename)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Error reading file: %v", err), http.StatusInternalServerError)
-		return
+		return "", fmt.Errorf("Error reading file: %v", err)
 	}
-	text = string(fileContent)
+	text := string(fileContent)
 	if text == "" {
-		http.Error(w, "Error transcribing", http.StatusInternalServerError)
-		return
+		return "", fmt.Errorf("Error transcribing")
 	}
 
-	err = setTranscription(url, text)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Error saving transcription: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	fmt.Fprintf(w, `{"transcription": "%s"}`, text)
+	return text, nil
 }
 
 func main() {
