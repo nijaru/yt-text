@@ -52,11 +52,6 @@ func validateURL(rawURL string) error {
 	if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
 		return fmt.Errorf("error: URL must start with http or https")
 	}
-	
-	if err := executeValidationScript(rawURL); err != nil {
-		log.Printf("ERROR: URL validation script failed for URL %s: %v", rawURL, err)
-		return fmt.Errorf("%v", err)
-	}
 
 	return nil
 }
@@ -107,7 +102,7 @@ func handleTranscription(ctx context.Context, url string) (string, error) {
 		log.Printf("ERROR: Failed to get transcription from DB for URL %s: %v", url, err)
 		return "", err
 	}
-
+	
 	if status == "completed" {
 		log.Printf("INFO: Transcription for URL %s found in database.", url)
 		return text, nil
@@ -119,6 +114,11 @@ func handleTranscription(ctx context.Context, url string) (string, error) {
 		return "", fmt.Errorf("error setting transcription status: %v", err)
 	}
 
+	if err := executeValidationScript(url); err != nil {
+		log.Printf("ERROR: URL validation script failed for URL %s: %v", url, err)
+		return "", fmt.Errorf("%v", err)
+	}
+	
 	text, err = runTranscriptionScript(ctx, url)
 	if err != nil {
 		db.SetTranscriptionStatus(ctx, url, "failed")
@@ -183,9 +183,23 @@ func runTranscriptionScript(ctx context.Context, url string) (string, error) {
 		log.Printf("ERROR: Transcription resulted in empty text for URL: %s", url)
 		return "", fmt.Errorf("error transcribing")
 	}
+	
+	text = formatText(text)
 
 	log.Printf("INFO: Transcription for URL %s completed successfully.", url)
 	return text, nil
+}
+
+func formatText(text string) string {
+    text = strings.TrimSpace(text)
+    var builder strings.Builder
+    for _, char := range text {
+        builder.WriteRune(char)
+        if char == '.' || char == '!' || char == '?' {
+            builder.WriteRune('\n')
+        }
+    }
+    return builder.String()
 }
 
 func executeValidationScript(url string) error {
