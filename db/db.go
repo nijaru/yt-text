@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log"
 	"time"
+	"os"
+	"path/filepath"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -14,6 +16,12 @@ var DB *sql.DB
 
 func InitializeDB(dbPath string) error {
 	log.Println("Initializing database")
+
+	// Ensure the directory for the database file exists
+	dir := filepath.Dir(dbPath)
+	if err := os.MkdirAll(dir, os.ModePerm); err != nil {
+		return fmt.Errorf("error creating directory for database: %v", err)
+	}
 
 	var err error
 	DB, err = sql.Open("sqlite3", dbPath)
