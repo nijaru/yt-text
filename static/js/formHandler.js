@@ -4,7 +4,7 @@ let controller;
 
 document
     .getElementById("transcriptionForm")
-    .addEventListener("submit", (event) => {
+    .addEventListener("submit", async (event) => {
         event.preventDefault();
         const submitButton = document.querySelector(
             'button[type="submit"]',
@@ -32,65 +32,58 @@ document
         controller = new AbortController();
         const signal = controller.signal;
 
-        fetch("/transcribe", {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
-
-            body: new URLSearchParams({
-                url: url,
-            }),
-            signal: signal, // Pass the signal to the fetch request
-        })
-            .then((response) => {
-                if (!response.ok) {
-                    return response.text().then((text) => {
-                        throw new Error(text);
-                    });
-                }
-                return response.json();
-            })
-            .then((data) => {
-                const responseDiv =
-                    document.getElementById("response");
-                responseDiv.innerText = data.transcription;
-
-                const copyButton =
-                    document.getElementById("copyButton");
-                copyButton.classList.remove("hidden"); // Show copy button
-                copyButton.onclick = () => {
-                    navigator.clipboard
-                        .writeText(data.transcription)
-                        .then(() => {
-                            alert("Text copied to clipboard");
-                        })
-                        .catch((err) => {
-                            alert(`Failed to copy text: ${err}`);
-                        });
-                };
-
-                const downloadButton =
-                    document.getElementById("downloadButton");
-                downloadButton.classList.remove("hidden"); // Show download button
-                downloadButton.onclick = () => {
-                    const blob = new Blob([data.transcription], {
-                        type: "text/plain",
-                    });
-                    const link = document.createElement("a");
-                    link.href = URL.createObjectURL(blob);
-                    link.download = `${url.replace(/[^a-z0-9]/gi, "_").toLowerCase()}.txt`;
-                    link.click();
-                };
-            })
-            .catch((error) => {
-                document.getElementById("response").innerText =
-                    `Error: ${error.message}`;
-            })
-            .finally(() => {
-                submitButton.disabled = false;
-                spinner.classList.add("hidden"); // Hide spinner
+        try {
+            const response = await fetch("/transcribe", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/x-www-form-urlencoded",
+                },
+                body: new URLSearchParams({
+                    url: url,
+                }),
+                signal: signal, // Pass the signal to the fetch request
             });
+
+            if (!response.ok) {
+                const text = await response.text();
+                throw new Error(text);
+            }
+
+            const data = await response.json();
+            const responseDiv = document.getElementById("response");
+            responseDiv.innerText = data.transcription;
+
+            const copyButton = document.getElementById("copyButton");
+            copyButton.classList.remove("hidden"); // Show copy button
+            copyButton.onclick = () => {
+                navigator.clipboard
+                    .writeText(data.transcription)
+                    .then(() => {
+                        alert("Text copied to clipboard");
+                    })
+                    .catch((err) => {
+                        alert(`Failed to copy text: ${err}`);
+                    });
+            };
+
+            const downloadButton = document.getElementById("downloadButton");
+            downloadButton.classList.remove("hidden"); // Show download button
+            downloadButton.onclick = () => {
+                const blob = new Blob([data.transcription], {
+                    type: "text/plain",
+                });
+                const link = document.createElement("a");
+                link.href = URL.createObjectURL(blob);
+                link.download = `${url.replace(/[^a-z0-9]/gi, "_").toLowerCase()}.txt`;
+                link.click();
+            };
+        } catch (error) {
+            document.getElementById("response").innerText =
+                `Error: ${error.message}`;
+        } finally {
+            submitButton.disabled = false;
+            spinner.classList.add("hidden"); // Hide spinner
+        }
 
         submitButton.disabled = true; // Disable the button after sending the request
     });
