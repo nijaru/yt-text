@@ -1,0 +1,12 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/root/data
+    environment:
+      - DB_PATH=/root/data/urls.db
+    restart: unless-stopped

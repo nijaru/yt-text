@@ -17,7 +17,7 @@ type Config struct {
 
 func LoadConfig() *Config {
 	return &Config{
-		DBPath:            getEnv("DB_PATH", "./urls.db"),
+		DBPath:            getEnv("DB_PATH", "./data/urls.db"),
 		ServerPort:        getEnv("SERVER_PORT", "8080"),
 		ReadTimeout:       getEnvAsDuration("READ_TIMEOUT", 10*time.Second),
 		WriteTimeout:      getEnvAsDuration("WRITE_TIMEOUT", 10*time.Second),
