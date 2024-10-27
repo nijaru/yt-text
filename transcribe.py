@@ -1,5 +1,7 @@
 import argparse
 import os
+import time
+import random
 
 import whisper
 import yt_dlp
@@ -9,7 +11,11 @@ def download_audio(url) -> str:
     ydl_opts = {
         "format": "bestaudio",
         "outtmpl": "%(id)s.%(ext)s",
-        # "sponsorblock": ["all"],
+        "postprocessors": [{
+            "key": "SponsorBlock",
+            "categories": ["sponsor", "intro", "outro", "selfpromo", "music_offtopic"],
+            "cut": True,
+        }],
         "quiet": True,
         "no_warnings": True,
     }
@@ -45,6 +51,17 @@ def save_to_file(file, text) -> str:
         raise RuntimeError(f"Failed to save to file: {e}")
 
 
+def retry_with_backoff(func, max_retries=3, initial_backoff=2, max_backoff=30, backoff_factor=2.0):
+    for attempt in range(1, max_retries + 1):
+        try:
+            return func()
+        except Exception as e:
+            if attempt == max_retries:
+                raise
+            backoff = min(initial_backoff * (backoff_factor ** (attempt - 1)), max_backoff)
+            time.sleep(backoff + random.uniform(0, backoff / 2))
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Download audio from youtube video and convert it to text"
@@ -54,7 +71,7 @@ if __name__ == "__main__":
     url = args.url
 
     model_name = "tiny.en"
-    filename = download_audio(url)
-    text = transcribe_audio(filename)
-    filename = save_to_file(filename, text)
+    filename = retry_with_backoff(lambda: download_audio(url))
+    text = retry_with_backoff(lambda: transcribe_audio(filename))
+    filename = retry_with_backoff(lambda: save_to_file(filename, text))
     print(filename)

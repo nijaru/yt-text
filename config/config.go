@@ -19,10 +19,10 @@ func LoadConfig() *Config {
 	return &Config{
 		DBPath:            getEnv("DB_PATH", "./data/urls.db"),
 		ServerPort:        getEnv("SERVER_PORT", "8080"),
-		ReadTimeout:       getEnvAsDuration("READ_TIMEOUT", 10*time.Second),
-		WriteTimeout:      getEnvAsDuration("WRITE_TIMEOUT", 10*time.Second),
-		IdleTimeout:       getEnvAsDuration("IDLE_TIMEOUT", 30*time.Second),
-		TranscribeTimeout: getEnvAsDuration("TRANSCRIBE_TIMEOUT", 5*time.Minute),
+		ReadTimeout:       getEnvAsDuration("READ_TIMEOUT", 30*time.Second),
+		WriteTimeout:      getEnvAsDuration("WRITE_TIMEOUT", 30*time.Second),
+		IdleTimeout:       getEnvAsDuration("IDLE_TIMEOUT", 60*time.Second),
+		TranscribeTimeout: getEnvAsDuration("TRANSCRIBE_TIMEOUT", 10*time.Minute),
 	}
 }
 

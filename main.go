@@ -32,6 +32,31 @@ type transcriptionLock struct {
 	mu sync.Mutex
 }
 
+type loggingResponseWriter struct {
+	http.ResponseWriter
+	statusCode int
+}
+
+func newLoggingResponseWriter(w http.ResponseWriter) *loggingResponseWriter {
+	return &loggingResponseWriter{w, http.StatusOK}
+}
+
+func (lrw *loggingResponseWriter) WriteHeader(code int) {
+	lrw.statusCode = code
+	lrw.ResponseWriter.WriteHeader(code)
+}
+
+func loggingMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		lrw := newLoggingResponseWriter(w)
+		next.ServeHTTP(lrw, r)
+		duration := time.Since(start)
+
+		log.Printf("INFO: %s %s %d %s", r.Method, r.URL.Path, lrw.statusCode, duration)
+	})
+}
+
 func getTranscriptionLock(url string) *transcriptionLock {
 	lock, _ := transcriptionLocks.LoadOrStore(url, &transcriptionLock{})
 	return lock.(*transcriptionLock)
@@ -59,22 +84,14 @@ func validateURL(rawURL string) error {
 func transcribeHandler(w http.ResponseWriter, r *http.Request) {
 	log.Printf("INFO: Received request: %s %s", r.Method, r.URL.Path)
 	if r.Method != http.MethodPost {
-		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
-		log.Printf("ERROR: Invalid request method: %s", r.Method)
+		handleError(w, "Invalid request method", http.StatusMethodNotAllowed)
 		return
 	}
 
 	url := r.FormValue("url")
 
-	if err := validateURL(url); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		log.Printf("ERROR: URL validation failed: %v", err)
-		return
-	}
-
-	if !rateLimiter.Allow() {
-		http.Error(w, "Rate limit exceeded", http.StatusTooManyRequests)
-		log.Printf("ERROR: Rate limit exceeded for URL: %s", url)
+	if err := validateAndRateLimit(w, url); err != nil {
+		log.Printf("ERROR: %v", err)
 		return
 	}
 
@@ -83,18 +100,50 @@ func transcribeHandler(w http.ResponseWriter, r *http.Request) {
 
 	text, err := handleTranscription(ctx, url)
 	if err != nil {
-		if validationErr, ok := err.(*ValidationError); ok {
-			http.Error(w, "Invalid URL", http.StatusBadRequest)
-			log.Printf("ERROR: URL validation failed for URL %s: %v", url, validationErr)
-		} else {
-			http.Error(w, "An error occurred while processing your request. Please try again later.", http.StatusInternalServerError)
-			log.Printf("ERROR: Transcription failed for URL %s: %v", url, err)
-		}
+		handleTranscriptionError(w, url, err)
 		return
 	}
 
-	sendJSONResponse(w, text)
+	if ctx.Err() != nil {
+		handleError(w, "Request timed out", http.StatusGatewayTimeout)
+		log.Printf("ERROR: Context cancelled before sending response for URL %s: %v", url, ctx.Err())
+		return
+	}
+
+	log.Printf("INFO: Sending JSON response for URL: %s", url)
+	if err := sendJSONResponse(w, text); err != nil {
+		log.Printf("ERROR: Failed to send JSON response for URL %s: %v", url, err)
+		return
+	}
 	log.Printf("INFO: Transcription successful for URL: %s", url)
+}
+
+func validateAndRateLimit(w http.ResponseWriter, url string) error {
+	if err := validateURL(url); err != nil {
+		handleError(w, err.Error(), http.StatusBadRequest)
+		return fmt.Errorf("URL validation failed: %v", err)
+	}
+
+	if !rateLimiter.Allow() {
+		handleError(w, "Rate limit exceeded", http.StatusTooManyRequests)
+		return fmt.Errorf("Rate limit exceeded for URL: %s", url)
+	}
+
+	return nil
+}
+
+func handleTranscriptionError(w http.ResponseWriter, url string, err error) {
+	if validationErr, ok := err.(*ValidationError); ok {
+		handleError(w, "Invalid URL", http.StatusBadRequest)
+		log.Printf("ERROR: URL validation failed for URL %s: %v", url, validationErr)
+	} else {
+		handleError(w, "An error occurred while processing your request. Please try again later.", http.StatusInternalServerError)
+		log.Printf("ERROR: Transcription failed for URL %s: %v", url, err)
+	}
+}
+
+func handleError(w http.ResponseWriter, message string, statusCode int) {
+	http.Error(w, message, statusCode)
 }
 
 func handleTranscription(ctx context.Context, url string) (string, error) {
@@ -113,19 +162,13 @@ func handleTranscription(ctx context.Context, url string) (string, error) {
 		return text, nil
 	}
 
-	err = db.SetTranscriptionStatus(ctx, url, "in_progress")
-	if err != nil {
+	if err := db.SetTranscriptionStatus(ctx, url, "in_progress"); err != nil {
 		log.Printf("ERROR: Failed to set transcription status to in_progress for URL %s: %v", url, err)
 		return "", fmt.Errorf("error setting transcription status: %v", err)
 	}
 
-	if err := executeValidationScript(url); err != nil {
-		if validationErr, ok := err.(*ValidationError); ok {
-			log.Printf("ERROR: URL validation script failed for URL %s: %v", url, validationErr)
-			return "", validationErr
-		}
-		log.Printf("ERROR: URL validation script failed for URL %s: %v", url, err)
-		return "", fmt.Errorf("error validating URL: %v", err)
+	if err := validateURLWithScript(url); err != nil {
+		return "", err
 	}
 
 	text, err = runTranscriptionScript(ctx, url)
@@ -135,34 +178,57 @@ func handleTranscription(ctx context.Context, url string) (string, error) {
 		return "", err
 	}
 
-	err = db.SetTranscription(ctx, url, text)
-	if err != nil {
-		log.Printf("ERROR: Failed to save transcription for URL %s: %v", url, err)
-		return "", fmt.Errorf("error saving transcription: %v", err)
+	if err := saveTranscription(ctx, url, text); err != nil {
+		return "", err
 	}
 
-	db.SetTranscriptionStatus(ctx, url, "completed")
 	log.Printf("INFO: Transcription for URL %s saved successfully.", url)
 	return text, nil
 }
 
-func sendJSONResponse(w http.ResponseWriter, text string) {
+func validateURLWithScript(url string) error {
+	if err := executeValidationScript(url); err != nil {
+		if validationErr, ok := err.(*ValidationError); ok {
+			log.Printf("ERROR: URL validation script failed for URL %s: %v", url, validationErr)
+			return validationErr
+		}
+		log.Printf("ERROR: URL validation script failed for URL %s: %v", url, err)
+		return fmt.Errorf("error validating URL: %v", err)
+	}
+	return nil
+}
+
+func saveTranscription(ctx context.Context, url, text string) error {
+	if err := db.SetTranscription(ctx, url, text); err != nil {
+		log.Printf("ERROR: Failed to save transcription for URL %s: %v", url, err)
+		return fmt.Errorf("error saving transcription: %v", err)
+	}
+
+	if err := db.SetTranscriptionStatus(ctx, url, "completed"); err != nil {
+		log.Printf("ERROR: Failed to set transcription status to completed for URL %s: %v", url, err)
+		return fmt.Errorf("error setting transcription status: %v", err)
+	}
+
+	return nil
+}
+
+func sendJSONResponse(w http.ResponseWriter, text string) error {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"transcription": text})
-	log.Printf("INFO: JSON response sent successfully.")
+	response := map[string]string{"transcription": text}
+	err := json.NewEncoder(w).Encode(response)
+	if err != nil {
+		log.Printf("ERROR: Failed to encode JSON response: %v", err)
+		http.Error(w, "Failed to encode JSON response", http.StatusInternalServerError)
+		return err
+	}
+	log.Printf("INFO: JSON response sent successfully")
+	return nil
 }
 
 func runTranscriptionScript(ctx context.Context, url string) (string, error) {
 	log.Printf("INFO: Starting transcription for URL: %s", url)
 
-	const (
-		maxRetries     = 3
-		initialBackoff = 2 * time.Second
-		maxBackoff     = 30 * time.Second
-		backoffFactor  = 2.0
-	)
-
-	output, err := executeTranscriptionScript(ctx, url, maxRetries, initialBackoff, maxBackoff, backoffFactor)
+	output, err := executeTranscriptionWithRetry(ctx, url)
 	if err != nil {
 		return "", err
 	}
@@ -182,6 +248,59 @@ func runTranscriptionScript(ctx context.Context, url string) (string, error) {
 		}
 	}()
 
+	text, err := readTranscriptionFile(filename)
+	if err != nil {
+		return "", err
+	}
+
+	log.Printf("INFO: Transcription for URL %s completed successfully.", url)
+	return text, nil
+}
+
+func executeTranscriptionWithRetry(ctx context.Context, url string) ([]byte, error) {
+	const (
+		maxRetries     = 3
+		initialBackoff = 2 * time.Second
+		maxBackoff     = 30 * time.Second
+		backoffFactor  = 2.0
+	)
+
+	var (
+		output []byte
+		err    error
+	)
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		output, err = executeTranscriptionScript(ctx, url, maxRetries, initialBackoff, maxBackoff, backoffFactor)
+		if err == nil {
+			break
+		}
+
+		log.Printf("ERROR: Transcription script failed (attempt %d/%d) for URL %s: %v, output: %s", attempt, maxRetries, url, err, output)
+
+		backoff := time.Duration(float64(initialBackoff) * math.Pow(backoffFactor, float64(attempt-1)))
+		if backoff > maxBackoff {
+			backoff = maxBackoff
+		}
+
+		select {
+		case <-time.After(backoff + time.Duration(rand.Int63n(int64(backoff/2)))):
+			// Continue to the next retry attempt
+		case <-ctx.Done():
+			log.Printf("ERROR: Context cancelled during transcription for URL %s: %v", url, ctx.Err())
+			return nil, ctx.Err()
+		}
+	}
+
+	if err != nil {
+		log.Printf("ERROR: Transcription failed after %d attempts for URL %s: %v, output: %s", maxRetries, url, err, output)
+		return nil, fmt.Errorf("error transcribing after %d attempts: %v, output: %s", maxRetries, err, output)
+	}
+
+	return output, nil
+}
+
+func readTranscriptionFile(filename string) (string, error) {
 	fileContent, err := os.ReadFile(filename)
 	if err != nil {
 		log.Printf("ERROR: Failed to read file %s: %v", filename, err)
@@ -189,14 +308,11 @@ func runTranscriptionScript(ctx context.Context, url string) (string, error) {
 	}
 	text := string(fileContent)
 	if text == "" {
-		log.Printf("ERROR: Transcription resulted in empty text for URL: %s", url)
+		log.Printf("ERROR: Transcription resulted in empty text for file: %s", filename)
 		return "", fmt.Errorf("error transcribing")
 	}
 
-	text = formatText(text)
-
-	log.Printf("INFO: Transcription for URL %s completed successfully.", url)
-	return text, nil
+	return formatText(text), nil
 }
 
 func formatText(text string) string {
@@ -329,14 +445,16 @@ func main() {
 	// Initialize rate limiter
 	rateLimiter = rate.NewLimiter(rate.Every(1*time.Second), 5) // 5 requests per second
 
-	// Serve static files
-	http.HandleFunc("/static/", serveStaticFiles)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/static/", serveStaticFiles)
+	mux.HandleFunc("/", serveIndex)
+	mux.HandleFunc("/transcribe", transcribeHandler)
 
-	http.HandleFunc("/", serveIndex)
-	http.HandleFunc("/transcribe", transcribeHandler)
+	loggedMux := loggingMiddleware(mux)
 
 	server := &http.Server{
 		Addr:         ":" + cfg.ServerPort,
+		Handler:      loggedMux,
 		ReadTimeout:  cfg.ReadTimeout,
 		WriteTimeout: cfg.WriteTimeout,
 		IdleTimeout:  cfg.IdleTimeout,
