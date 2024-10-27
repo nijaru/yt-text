@@ -83,8 +83,13 @@ func transcribeHandler(w http.ResponseWriter, r *http.Request) {
 
 	text, err := handleTranscription(ctx, url)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		log.Printf("ERROR: Transcription failed for URL %s: %v", url, err)
+		if validationErr, ok := err.(*ValidationError); ok {
+			http.Error(w, "Invalid URL", http.StatusBadRequest)
+			log.Printf("ERROR: URL validation failed for URL %s: %v", url, validationErr)
+		} else {
+			http.Error(w, "An error occurred while processing your request. Please try again later.", http.StatusInternalServerError)
+			log.Printf("ERROR: Transcription failed for URL %s: %v", url, err)
+		}
 		return
 	}
 
@@ -93,16 +98,16 @@ func transcribeHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleTranscription(ctx context.Context, url string) (string, error) {
-    lock := getTranscriptionLock(url)
+	lock := getTranscriptionLock(url)
 	lock.mu.Lock()
 	defer lock.mu.Unlock()
-	
+
 	text, status, err := db.GetTranscription(ctx, url)
 	if err != nil {
 		log.Printf("ERROR: Failed to get transcription from DB for URL %s: %v", url, err)
 		return "", err
 	}
-	
+
 	if status == "completed" {
 		log.Printf("INFO: Transcription for URL %s found in database.", url)
 		return text, nil
@@ -115,10 +120,14 @@ func handleTranscription(ctx context.Context, url string) (string, error) {
 	}
 
 	if err := executeValidationScript(url); err != nil {
+		if validationErr, ok := err.(*ValidationError); ok {
+			log.Printf("ERROR: URL validation script failed for URL %s: %v", url, validationErr)
+			return "", validationErr
+		}
 		log.Printf("ERROR: URL validation script failed for URL %s: %v", url, err)
-		return "", fmt.Errorf("%v", err)
+		return "", fmt.Errorf("error validating URL: %v", err)
 	}
-	
+
 	text, err = runTranscriptionScript(ctx, url)
 	if err != nil {
 		db.SetTranscriptionStatus(ctx, url, "failed")
@@ -183,7 +192,7 @@ func runTranscriptionScript(ctx context.Context, url string) (string, error) {
 		log.Printf("ERROR: Transcription resulted in empty text for URL: %s", url)
 		return "", fmt.Errorf("error transcribing")
 	}
-	
+
 	text = formatText(text)
 
 	log.Printf("INFO: Transcription for URL %s completed successfully.", url)
@@ -191,33 +200,41 @@ func runTranscriptionScript(ctx context.Context, url string) (string, error) {
 }
 
 func formatText(text string) string {
-    text = strings.TrimSpace(text)
-    var builder strings.Builder
-    for _, char := range text {
-        builder.WriteRune(char)
-        if char == '.' || char == '!' || char == '?' {
-            builder.WriteRune('\n')
-        }
-    }
-    return builder.String()
+	text = strings.TrimSpace(text)
+	var builder strings.Builder
+	for _, char := range text {
+		builder.WriteRune(char)
+		if char == '.' || char == '!' || char == '?' {
+			builder.WriteRune('\n')
+		}
+	}
+	return builder.String()
+}
+
+type ValidationError struct {
+	Message string
+}
+
+func (e *ValidationError) Error() string {
+	return e.Message
 }
 
 func executeValidationScript(url string) error {
-    cmd := exec.Command("uv", "run", "validate.py", url)
-    output, err := cmd.CombinedOutput()
-    if err != nil {
-        return fmt.Errorf("error executing validation script: %v, output: %s", err, output)
-    }
+	cmd := exec.Command("uv", "run", "validate.py", url)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("error executing validation script: %v, output: %s", err, output)
+	}
 
-    outputLines := strings.Split(strings.TrimSpace(string(output)), "\n")
-    if len(outputLines) == 0 {
-        return fmt.Errorf("error: validation script returned no output")
-    }
-    lastLine := outputLines[len(outputLines)-1]
-    if lastLine != "True" {
-        return fmt.Errorf(lastLine)
-    }
-    return nil
+	outputLines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	if len(outputLines) == 0 {
+		return &ValidationError{Message: "Validation script returned no output"}
+	}
+	lastLine := outputLines[len(outputLines)-1]
+	if lastLine != "True" {
+		return &ValidationError{Message: lastLine}
+	}
+	return nil
 }
 
 func executeTranscriptionScript(ctx context.Context, url string, maxRetries int, initialBackoff, maxBackoff time.Duration, backoffFactor float64) ([]byte, error) {
@@ -287,6 +304,11 @@ func serveIndex(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, "./static/index.html")
 }
 
+func serveStaticFiles(w http.ResponseWriter, r *http.Request) {
+	filePath := "." + r.URL.Path
+	http.ServeFile(w, r, filePath)
+}
+
 func main() {
 	cfg = config.LoadConfig()
 
@@ -306,6 +328,9 @@ func main() {
 
 	// Initialize rate limiter
 	rateLimiter = rate.NewLimiter(rate.Every(1*time.Second), 5) // 5 requests per second
+
+	// Serve static files
+	http.HandleFunc("/static/", serveStaticFiles)
 
 	http.HandleFunc("/", serveIndex)
 	http.HandleFunc("/transcribe", transcribeHandler)

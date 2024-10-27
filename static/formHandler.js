@@ -18,6 +18,9 @@ document
             .getElementById("downloadButton")
             .classList.add("hidden"); // Hide download button
         spinner.classList.remove("hidden"); // Show spinner
+
+        submitButton.disabled = true; // Disable the button after sending the request
+
         const url = document.getElementById("url").value;
 
         // Validate URL format
@@ -25,6 +28,7 @@ document
             document.getElementById("response").innerText =
                 "Invalid URL format. Please enter a valid URL.";
             spinner.classList.add("hidden"); // Hide spinner
+            submitButton.disabled = false; // Re-enable the button
             return;
         }
 
@@ -46,7 +50,17 @@ document
 
             if (!response.ok) {
                 const text = await response.text();
-                throw new Error(text);
+                if (response.status === 400) {
+                    document.getElementById("response").innerText =
+                        "Invalid URL. Please enter a valid URL.";
+                } else if (response.status === 429) {
+                    document.getElementById("response").innerText =
+                        "Too many requests. Please try again later.";
+                } else {
+                    document.getElementById("response").innerText =
+                        "An error occurred while processing your request. Please try again later.";
+                }
+                return; // Do not throw an error to prevent logging to the console
             }
 
             const data = await response.json();
@@ -61,8 +75,9 @@ document
                     .then(() => {
                         alert("Text copied to clipboard");
                     })
-                    .catch((err) => {
-                        alert(`Failed to copy text: ${err}`);
+                    .catch(() => {
+                        document.getElementById("response").innerText =
+                            "Failed to copy text. Please try again.";
                     });
             };
 
@@ -78,14 +93,11 @@ document
                 link.click();
             };
         } catch (error) {
-            document.getElementById("response").innerText =
-                `Error: ${error.message}`;
+            // Handle the error gracefully without logging to the console
         } finally {
-            submitButton.disabled = false;
+            submitButton.disabled = false; // Re-enable the button
             spinner.classList.add("hidden"); // Hide spinner
         }
-
-        submitButton.disabled = true; // Disable the button after sending the request
     });
 
 window.addEventListener("beforeunload", () => {
