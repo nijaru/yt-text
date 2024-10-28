@@ -51,7 +51,7 @@ This tool operates as a web server that accepts a YouTube URL (or any other URL 
     ```
 
 ## License
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+This project is licensed under the GNU Affero General Public License (AGPL) version 3. See the [LICENSE](LICENSE) file for details.
 
 ## Contributing
 Contributions are welcome! Please open an issue or submit a pull request for any changes.
