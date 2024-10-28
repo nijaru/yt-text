@@ -30,9 +30,9 @@ def download_audio(url) -> str:
         raise RuntimeError(f"An unexpected error occurred: {e}")
 
 
-def transcribe_audio(file):
+def transcribe_audio(file, model_name):
     try:
-        model = whisper.load_model("tiny.en")
+        model = whisper.load_model(model_name)
         results = model.transcribe(file)
         text = results["text"]
         os.remove(file)
@@ -62,16 +62,23 @@ def retry_with_backoff(func, max_retries=3, initial_backoff=2, max_backoff=30, b
             time.sleep(backoff + random.uniform(0, backoff / 2))
 
 
-if __name__ == "__main__":
+
+
+def main():
     parser = argparse.ArgumentParser(
         description="Download audio from youtube video and convert it to text"
     )
     parser.add_argument("url", type=str, help="URL of the youtube video")
+    parser.add_argument("--model", type=str, default="tiny.en", help="Name of the Whisper model to use")
+
     args = parser.parse_args()
     url = args.url
+    model_name = args.model
 
-    model_name = "tiny.en"
     filename = retry_with_backoff(lambda: download_audio(url))
-    text = retry_with_backoff(lambda: transcribe_audio(filename))
+    text = retry_with_backoff(lambda: transcribe_audio(filename, model_name))
     filename = retry_with_backoff(lambda: save_to_file(filename, text))
     print(filename)
+
+if __name__ == "__main__":
+    main()
