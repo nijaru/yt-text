@@ -1,7 +1,7 @@
 import argparse
 import os
-import time
 import random
+import time
 
 import whisper
 import yt_dlp
@@ -50,7 +50,7 @@ def retry_with_backoff(func, max_retries=3, initial_backoff=2, max_backoff=30, b
     for attempt in range(1, max_retries + 1):
         try:
             return func()
-        except Exception as e:
+        except Exception:
             if attempt == max_retries:
                 raise
             backoff = min(initial_backoff * (backoff_factor ** (attempt - 1)), max_backoff)
