@@ -11,11 +11,6 @@ def download_audio(url) -> str:
     ydl_opts = {
         "format": "bestaudio",
         "outtmpl": "%(id)s.%(ext)s",
-        "postprocessors": [{
-            "key": "SponsorBlock",
-            "categories": ["sponsor", "intro", "outro", "selfpromo", "music_offtopic"],
-            "cut": True,
-        }],
         "quiet": True,
         "no_warnings": True,
     }
