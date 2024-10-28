@@ -1,9 +1,11 @@
 package config
 
 import (
-	"log"
 	"os"
+	"strconv"
 	"time"
+
+	"github.com/sirupsen/logrus"
 )
 
 type Config struct {
@@ -13,6 +15,8 @@ type Config struct {
 	WriteTimeout      time.Duration
 	IdleTimeout       time.Duration
 	TranscribeTimeout time.Duration
+	RateLimit         int
+	RateLimitInterval time.Duration
 }
 
 func LoadConfig() *Config {
@@ -23,6 +27,8 @@ func LoadConfig() *Config {
 		WriteTimeout:      getEnvAsDuration("WRITE_TIMEOUT", 30*time.Second),
 		IdleTimeout:       getEnvAsDuration("IDLE_TIMEOUT", 60*time.Second),
 		TranscribeTimeout: getEnvAsDuration("TRANSCRIBE_TIMEOUT", 10*time.Minute),
+		RateLimit:         getEnvAsInt("RATE_LIMIT", 5),
+		RateLimitInterval: getEnvAsDuration("RATE_LIMIT_INTERVAL", 1*time.Second),
 	}
 }
 
@@ -38,7 +44,25 @@ func getEnvAsDuration(key string, defaultValue time.Duration) time.Duration {
 		if duration, err := time.ParseDuration(value); err == nil {
 			return duration
 		}
-		log.Printf("Invalid duration for %s: %s, using default: %v", key, value, defaultValue)
+		logrus.WithFields(logrus.Fields{
+			"key":          key,
+			"value":        value,
+			"defaultValue": defaultValue,
+		}).Warn("Invalid duration, using default")
+	}
+	return defaultValue
+}
+
+func getEnvAsInt(key string, defaultValue int) int {
+	if value, exists := os.LookupEnv(key); exists {
+		if intValue, err := strconv.Atoi(value); err == nil {
+			return intValue
+		}
+		logrus.WithFields(logrus.Fields{
+			"key":          key,
+			"value":        value,
+			"defaultValue": defaultValue,
+		}).Warn("Invalid integer, using default")
 	}
 	return defaultValue
 }

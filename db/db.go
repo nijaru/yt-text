@@ -4,18 +4,18 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"log"
-	"time"
 	"os"
 	"path/filepath"
+	"time"
 
+	"github.com/sirupsen/logrus"
 	_ "github.com/mattn/go-sqlite3"
 )
 
 var DB *sql.DB
 
 func InitializeDB(dbPath string) error {
-	log.Println("Initializing database")
+	logrus.Info("Initializing database")
 
 	// Ensure the directory for the database file exists
 	dir := filepath.Dir(dbPath)
