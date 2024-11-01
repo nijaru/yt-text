@@ -10,27 +10,29 @@ import (
 )
 
 type Config struct {
-	DBPath            string
-	ServerPort        string
-	ReadTimeout       time.Duration
-	WriteTimeout      time.Duration
-	IdleTimeout       time.Duration
-	TranscribeTimeout time.Duration
-	RateLimit         int
-	RateLimitInterval time.Duration
+    DBPath            string
+    ServerPort        string
+    ReadTimeout       time.Duration
+    WriteTimeout      time.Duration
+    IdleTimeout       time.Duration
+    TranscribeTimeout time.Duration
+    RateLimit         int
+    RateLimitInterval time.Duration
+    ModelName         string
 }
 
 func LoadConfig() *Config {
-	return &Config{
-		DBPath:            GetEnv("DB_PATH", "./data/urls.db"),
-		ServerPort:        GetEnv("SERVER_PORT", "8080"),
-		ReadTimeout:       getEnvAsDuration("READ_TIMEOUT", 30*time.Second),
-		WriteTimeout:      getEnvAsDuration("WRITE_TIMEOUT", 30*time.Second),
-		IdleTimeout:       getEnvAsDuration("IDLE_TIMEOUT", 60*time.Second),
-		TranscribeTimeout: getEnvAsDuration("TRANSCRIBE_TIMEOUT", 10*time.Minute),
-		RateLimit:         getEnvAsInt("RATE_LIMIT", 5),
-		RateLimitInterval: getEnvAsDuration("RATE_LIMIT_INTERVAL", 1*time.Second),
-	}
+    return &Config{
+        DBPath:            GetEnv("DB_PATH", "./data/urls.db"),
+        ServerPort:        GetEnv("SERVER_PORT", "8080"),
+        ReadTimeout:       getEnvAsDuration("READ_TIMEOUT", 30*time.Second),
+        WriteTimeout:      getEnvAsDuration("WRITE_TIMEOUT", 30*time.Second),
+        IdleTimeout:       getEnvAsDuration("IDLE_TIMEOUT", 60*time.Second),
+        TranscribeTimeout: getEnvAsDuration("TRANSCRIBE_TIMEOUT", 10*time.Minute),
+        RateLimit:         getEnvAsInt("RATE_LIMIT", 5),
+        RateLimitInterval: getEnvAsDuration("RATE_LIMIT_INTERVAL", 1*time.Second),
+        ModelName:         GetEnv("MODEL_NAME", "base.en"),
+    }
 }
 
 func GetEnv(key, defaultValue string) string {

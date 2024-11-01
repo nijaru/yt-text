@@ -38,7 +38,7 @@ This tool operates as a web server that accepts a YouTube URL (or any other URL 
     ```sh
     python transcribe.py <youtube-url> --model <model_name>
     ```
-  The default model is `tiny.en`. You can choose from other models like `base`, `small`, `medium`, `large`, etc.
+  The default model is `base.en`. You can choose from other models like `tiny`, `small`, `medium`, `large`, etc.
 
 ## Examples
 - Transcribe a video using the default model:
