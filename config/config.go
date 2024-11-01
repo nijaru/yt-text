@@ -1,6 +1,7 @@
 package config
 
 import (
+	"github.com/pkg/errors"
 	"os"
 	"strconv"
 	"time"
@@ -21,8 +22,8 @@ type Config struct {
 
 func LoadConfig() *Config {
 	return &Config{
-		DBPath:            getEnv("DB_PATH", "./data/urls.db"),
-		ServerPort:        getEnv("SERVER_PORT", "8080"),
+		DBPath:            GetEnv("DB_PATH", "./data/urls.db"),
+		ServerPort:        GetEnv("SERVER_PORT", "8080"),
 		ReadTimeout:       getEnvAsDuration("READ_TIMEOUT", 30*time.Second),
 		WriteTimeout:      getEnvAsDuration("WRITE_TIMEOUT", 30*time.Second),
 		IdleTimeout:       getEnvAsDuration("IDLE_TIMEOUT", 60*time.Second),
@@ -32,7 +33,7 @@ func LoadConfig() *Config {
 	}
 }
 
-func getEnv(key, defaultValue string) string {
+func GetEnv(key, defaultValue string) string {
 	if value, exists := os.LookupEnv(key); exists {
 		return value
 	}
@@ -65,4 +66,26 @@ func getEnvAsInt(key string, defaultValue int) int {
 		}).Warn("Invalid integer, using default")
 	}
 	return defaultValue
+}
+
+func ValidateConfig(cfg *Config) error {
+	if cfg.ServerPort == "" {
+		return errors.New("server port is required")
+	}
+	if cfg.DBPath == "" {
+		return errors.New("database path is required")
+	}
+	if cfg.TranscribeTimeout <= 0 {
+		return errors.New("transcribe timeout must be greater than 0")
+	}
+	if cfg.ReadTimeout <= 0 {
+		return errors.New("read timeout must be greater than 0")
+	}
+	if cfg.WriteTimeout <= 0 {
+		return errors.New("write timeout must be greater than 0")
+	}
+	if cfg.IdleTimeout <= 0 {
+		return errors.New("idle timeout must be greater than 0")
+	}
+	return nil
 }

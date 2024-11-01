@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -12,16 +11,17 @@ import (
 	"time"
 
 	"github.com/nijaru/yt-text/config"
-	"github.com/nijaru/yt-text/db"
-	"github.com/nijaru/yt-text/handlers"
-	"github.com/nijaru/yt-text/middleware"
+    "github.com/nijaru/yt-text/db"
+    "github.com/nijaru/yt-text/handlers"
+    "github.com/nijaru/yt-text/middleware"
+	
 	"github.com/sirupsen/logrus"
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 func init() {
 	// Ensure the log directory exists
-	logDir := "./logs"
+	logDir := config.GetEnv("LOG_DIR", "./logs")
 	if err := os.MkdirAll(logDir, os.ModePerm); err != nil {
 		logrus.Fatalf("Failed to create log directory: %v", err)
 	}
@@ -48,7 +48,7 @@ func main() {
 	cfg := config.LoadConfig()
 
 	// Validate configuration
-	if err := validateConfig(cfg); err != nil {
+	if err := config.ValidateConfig(cfg); err != nil {
 		logrus.WithError(err).Fatal("Invalid configuration")
 	}
 
@@ -100,28 +100,11 @@ func main() {
 	if err := server.Shutdown(ctx); err != nil {
 		logrus.WithError(err).Fatal("Server Shutdown")
 	}
-}
 
-func validateConfig(cfg *config.Config) error {
-	if cfg.ServerPort == "" {
-		return fmt.Errorf("server port is required")
+	// Close database connection
+	if err := db.DB.Close(); err != nil {
+		logrus.WithError(err).Error("Failed to close database")
 	}
-	if cfg.DBPath == "" {
-		return fmt.Errorf("database path is required")
-	}
-	if cfg.TranscribeTimeout <= 0 {
-		return fmt.Errorf("transcribe timeout must be greater than 0")
-	}
-	if cfg.ReadTimeout <= 0 {
-		return fmt.Errorf("read timeout must be greater than 0")
-	}
-	if cfg.WriteTimeout <= 0 {
-		return fmt.Errorf("write timeout must be greater than 0")
-	}
-	if cfg.IdleTimeout <= 0 {
-		return fmt.Errorf("idle timeout must be greater than 0")
-	}
-	return nil
 }
 
 func serveIndex(w http.ResponseWriter, r *http.Request) {
