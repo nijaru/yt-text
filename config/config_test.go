@@ -15,6 +15,7 @@ func TestLoadConfig(t *testing.T) {
 	os.Setenv("TRANSCRIBE_TIMEOUT", "5m")
 	os.Setenv("RATE_LIMIT", "10")
 	os.Setenv("RATE_LIMIT_INTERVAL", "2s")
+	os.Setenv("MODEL_NAME", "large.en")
 
 	cfg := LoadConfig()
 
@@ -41,5 +42,8 @@ func TestLoadConfig(t *testing.T) {
 	}
 	if cfg.RateLimitInterval != 2*time.Second {
 		t.Errorf("expected 2s, got %s", cfg.RateLimitInterval)
+	}
+	if cfg.ModelName != "large.en" {
+		t.Errorf("expected large.en, got %s", cfg.ModelName)
 	}
 }

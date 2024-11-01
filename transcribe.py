@@ -46,14 +46,18 @@ def save_to_file(file, text) -> str:
         raise RuntimeError(f"Failed to save to file: {e}")
 
 
-def retry_with_backoff(func, max_retries=3, initial_backoff=2, max_backoff=30, backoff_factor=2.0):
+def retry_with_backoff(
+    func, max_retries=3, initial_backoff=2, max_backoff=30, backoff_factor=2.0
+):
     for attempt in range(1, max_retries + 1):
         try:
             return func()
         except Exception:
             if attempt == max_retries:
                 raise
-            backoff = min(initial_backoff * (backoff_factor ** (attempt - 1)), max_backoff)
+            backoff = min(
+                initial_backoff * (backoff_factor ** (attempt - 1)), max_backoff
+            )
             time.sleep(backoff + random.uniform(0, backoff / 2))
 
 
@@ -62,7 +66,9 @@ def main():
         description="Download audio from youtube video and convert it to text"
     )
     parser.add_argument("url", type=str, help="URL of the youtube video")
-    parser.add_argument("--model", type=str, default="base.en", help="Name of the Whisper model to use")
+    parser.add_argument(
+        "--model", type=str, default="base.en", help="Name of the Whisper model to use"
+    )
 
     args = parser.parse_args()
     url = args.url
@@ -72,6 +78,7 @@ def main():
     text = retry_with_backoff(lambda: transcribe_audio(filename, model_name))
     filename = retry_with_backoff(lambda: save_to_file(filename, text))
     print(filename)
+
 
 if __name__ == "__main__":
     main()

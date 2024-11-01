@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/sirupsen/logrus"
 	_ "github.com/mattn/go-sqlite3"
+	"github.com/sirupsen/logrus"
 )
 
 var DB *sql.DB
@@ -39,8 +39,8 @@ func InitializeDB(dbPath string) error {
                     url TEXT NOT NULL UNIQUE,
                     text TEXT,
                     status TEXT NOT NULL DEFAULT 'pending',
-                    model_version TEXT NOT NULL DEFAULT ''
-)`)
+                    model_name TEXT NOT NULL DEFAULT ''
+    )`)
 	if err != nil {
 		DB.Close() // Close the database connection in case of an error
 		return fmt.Errorf("error creating table: %v", err)
@@ -68,41 +68,41 @@ func GetTranscription(ctx context.Context, url string) (string, string, error) {
 }
 
 func GetModelName(ctx context.Context, url string) (string, error) {
-    var modelName string
-    err := DB.QueryRowContext(ctx, "SELECT model_name FROM urls WHERE url = ?", url).Scan(&modelName)
-    if err != nil {
-        if err == sql.ErrNoRows {
-            return "", nil
-        }
-        return "", fmt.Errorf("error querying database: %v", err)
-    }
-    return modelName, nil
+	var modelName string
+	err := DB.QueryRowContext(ctx, "SELECT model_name FROM urls WHERE url = ?", url).Scan(&modelName)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return "", nil
+		}
+		return "", fmt.Errorf("error querying database: %v", err)
+	}
+	return modelName, nil
 }
 
 func SetTranscription(ctx context.Context, url, text, modelName string) error {
-    tx, err := DB.BeginTx(ctx, nil)
-    if err != nil {
-        return fmt.Errorf("error beginning transaction: %v", err)
-    }
+	tx, err := DB.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("error beginning transaction: %v", err)
+	}
 
-    stmt, err := tx.PrepareContext(ctx, "INSERT INTO urls (url, text, status, model_name) VALUES (?, ?, 'completed', ?) ON CONFLICT(url) DO UPDATE SET text=excluded.text, status='completed', model_name=excluded.model_name")
-    if err != nil {
-        tx.Rollback()
-        return fmt.Errorf("error preparing statement: %v", err)
-    }
-    defer stmt.Close()
+	stmt, err := tx.PrepareContext(ctx, "INSERT INTO urls (url, text, status, model_name) VALUES (?, ?, 'completed', ?) ON CONFLICT(url) DO UPDATE SET text=excluded.text, status='completed', model_name=excluded.model_name")
+	if err != nil {
+		tx.Rollback()
+		return fmt.Errorf("error preparing statement: %v", err)
+	}
+	defer stmt.Close()
 
-    _, err = stmt.ExecContext(ctx, url, text, modelName)
-    if err != nil {
-        tx.Rollback()
-        return fmt.Errorf("error executing statement: %v", err)
-    }
+	_, err = stmt.ExecContext(ctx, url, text, modelName)
+	if err != nil {
+		tx.Rollback()
+		return fmt.Errorf("error executing statement: %v", err)
+	}
 
-    if err := tx.Commit(); err != nil {
-        return fmt.Errorf("error committing transaction: %v", err)
-    }
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("error committing transaction: %v", err)
+	}
 
-    return nil
+	return nil
 }
 
 func SetTranscriptionStatus(ctx context.Context, url, status string) error {

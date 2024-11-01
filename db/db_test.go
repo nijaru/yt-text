@@ -2,27 +2,36 @@ package db
 
 import (
 	"context"
+	"os"
 	"testing"
 )
 
+const testDBPath = "/tmp/test.db"
+
 func TestMain(m *testing.M) {
 	// Setup: Initialize the database
-	err := InitializeDB("/tmp/test.db")
+	err := InitializeDB(testDBPath)
 	if err != nil {
 		panic("Failed to initialize database: " + err.Error())
 	}
-	defer DB.Close()
 
 	// Run tests
-	m.Run()
+	code := m.Run()
+
+	// Cleanup: Remove the test database file
+	os.Remove(testDBPath)
+
+	// Exit with the test result code
+	os.Exit(code)
 }
 
 func TestSetAndGetTranscription(t *testing.T) {
 	ctx := context.Background()
 	url := "http://example.com"
 	text := "Example transcription text"
+	modelName := "base.en"
 
-	err := SetTranscription(ctx, url, text)
+	err := SetTranscription(ctx, url, text, modelName)
 	if err != nil {
 		t.Fatalf("Failed to set transcription: %v", err)
 	}
@@ -36,6 +45,14 @@ func TestSetAndGetTranscription(t *testing.T) {
 	}
 	if retrievedText != text {
 		t.Errorf("expected text '%s', got '%s'", text, retrievedText)
+	}
+
+	retrievedModelName, err := GetModelName(ctx, url)
+	if err != nil {
+		t.Fatalf("Failed to get model name: %v", err)
+	}
+	if retrievedModelName != modelName {
+		t.Errorf("expected model name '%s', got '%s'", modelName, retrievedModelName)
 	}
 }
 
