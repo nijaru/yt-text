@@ -9,9 +9,11 @@ document
 		const submitButton = document.querySelector('button[type="submit"]');
 		const spinner = document.getElementById("spinner");
 		const transcriptionStatus = document.getElementById("transcriptionStatus");
+		const transcriptionHeader = document.getElementById("transcriptionHeader");
 		document.getElementById("response").innerText = ""; // Clear response
 		document.getElementById("copyButton").classList.add("hidden"); // Hide copy button
 		document.getElementById("downloadButton").classList.add("hidden"); // Hide download button
+		transcriptionHeader.classList.add("hidden"); // Hide transcription header
 		spinner.classList.remove("hidden"); // Show spinner
 		transcriptionStatus.classList.remove("hidden"); // Show transcription status
 
@@ -89,6 +91,8 @@ document
 				link.download = `${url.replace(/[^a-z0-9]/gi, "_").toLowerCase()}.txt`;
 				link.click();
 			};
+
+			transcriptionHeader.classList.remove("hidden"); // Show transcription header
 		} catch (error) {
 			// Handle the error gracefully without logging to the console
 		} finally {
