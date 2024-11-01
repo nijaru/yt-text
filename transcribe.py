@@ -57,14 +57,12 @@ def retry_with_backoff(func, max_retries=3, initial_backoff=2, max_backoff=30, b
             time.sleep(backoff + random.uniform(0, backoff / 2))
 
 
-
-
 def main():
     parser = argparse.ArgumentParser(
         description="Download audio from youtube video and convert it to text"
     )
     parser.add_argument("url", type=str, help="URL of the youtube video")
-    parser.add_argument("--model", type=str, default="tiny.en", help="Name of the Whisper model to use")
+    parser.add_argument("--model", type=str, default="base.en", help="Name of the Whisper model to use")
 
     args = parser.parse_args()
     url = args.url

@@ -55,8 +55,19 @@ func (s *TranscriptionService) HandleTranscription(ctx context.Context, url stri
     }
 
     if status == "completed" {
-        logrus.WithField("url", url).Info("Transcription found in database")
-        return text, nil
+        // Check if the model name in the database is different from the current model name
+        modelName, err := db.GetModelName(ctx, url)
+        if err != nil {
+            logrus.WithError(err).WithField("url", url).Error("Failed to get model name from DB")
+            return "", err
+        }
+
+        if modelName == cfg.ModelName {
+            logrus.WithField("url", url).Info("Transcription found in database with the same model name")
+            return text, nil
+        }
+
+        logrus.WithField("url", url).Info("Model name mismatch, redoing transcription")
     }
 
     if err := db.SetTranscriptionStatus(ctx, url, "in_progress"); err != nil {
@@ -75,7 +86,7 @@ func (s *TranscriptionService) HandleTranscription(ctx context.Context, url stri
         return "", err
     }
 
-    if err := saveTranscription(ctx, url, text); err != nil {
+    if err := saveTranscription(ctx, url, text, cfg.ModelName); err != nil {
         return "", err
     }
 
@@ -83,8 +94,8 @@ func (s *TranscriptionService) HandleTranscription(ctx context.Context, url stri
     return text, nil
 }
 
-func saveTranscription(ctx context.Context, url, text string) error {
-    if err := db.SetTranscription(ctx, url, text); err != nil {
+func saveTranscription(ctx context.Context, url, text, modelName string) error {
+    if err := db.SetTranscription(ctx, url, text, modelName); err != nil {
         logrus.WithError(err).WithField("url", url).Error("Failed to save transcription")
         return fmt.Errorf("error saving transcription: %v", err)
     }
