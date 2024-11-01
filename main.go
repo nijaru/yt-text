@@ -11,10 +11,10 @@ import (
 	"time"
 
 	"github.com/nijaru/yt-text/config"
-    "github.com/nijaru/yt-text/db"
-    "github.com/nijaru/yt-text/handlers"
-    "github.com/nijaru/yt-text/middleware"
-	
+	"github.com/nijaru/yt-text/db"
+	"github.com/nijaru/yt-text/handlers"
+	"github.com/nijaru/yt-text/middleware"
+
 	"github.com/sirupsen/logrus"
 	"gopkg.in/natefinch/lumberjack.v2"
 )
@@ -69,6 +69,7 @@ func main() {
 	mux.HandleFunc("/static/", serveStaticFiles)
 	mux.HandleFunc("/", serveIndex)
 	mux.HandleFunc("/transcribe", handlers.TranscribeHandler)
+	mux.HandleFunc("/summarize", handlers.SummarizeHandler)
 
 	loggedMux := middleware.LoggingMiddleware(mux)
 
