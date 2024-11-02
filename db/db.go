@@ -176,12 +176,14 @@ func GetSummary(ctx context.Context, url string) (string, string, error) {
 func SetSummary(ctx context.Context, url, summary, summaryModelName string) error {
 	tx, err := DB.BeginTx(ctx, nil)
 	if err != nil {
+		logrus.WithError(err).Error("Error beginning transaction")
 		return fmt.Errorf("error beginning transaction: %v", err)
 	}
 
 	stmt, err := tx.PrepareContext(ctx, "INSERT INTO urls (url, summary, summary_model_name) VALUES (?, ?, ?) ON CONFLICT(url) DO UPDATE SET summary=excluded.summary, summary_model_name=excluded.summary_model_name")
 	if err != nil {
 		tx.Rollback()
+		logrus.WithError(err).Error("Error preparing statement")
 		return fmt.Errorf("error preparing statement: %v", err)
 	}
 	defer stmt.Close()
@@ -189,12 +191,20 @@ func SetSummary(ctx context.Context, url, summary, summaryModelName string) erro
 	_, err = stmt.ExecContext(ctx, url, summary, summaryModelName)
 	if err != nil {
 		tx.Rollback()
+		logrus.WithError(err).Error("Error executing statement")
 		return fmt.Errorf("error executing statement: %v", err)
 	}
 
 	if err := tx.Commit(); err != nil {
+		logrus.WithError(err).Error("Error committing transaction")
 		return fmt.Errorf("error committing transaction: %v", err)
 	}
+
+	logrus.WithFields(logrus.Fields{
+		"url":              url,
+		"summary":          summary,
+		"summaryModelName": summaryModelName,
+	}).Info("Summary saved to DB successfully")
 
 	return nil
 }

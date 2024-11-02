@@ -117,11 +117,13 @@ func SummarizeHandler(w http.ResponseWriter, r *http.Request) {
 	text, status, err := db.GetTranscription(ctx, url)
 	if err != nil {
 		utils.HandleError(w, "Failed to get transcription from DB", http.StatusInternalServerError)
+		logrus.WithError(err).Error("Failed to get transcription from DB")
 		return
 	}
 
 	if status != "completed" {
 		utils.HandleError(w, "Transcription not completed", http.StatusBadRequest)
+		logrus.WithField("url", url).Error("Transcription not completed")
 		return
 	}
 
@@ -129,6 +131,7 @@ func SummarizeHandler(w http.ResponseWriter, r *http.Request) {
 	summary, summaryModelName, err := db.GetSummary(ctx, url)
 	if err != nil {
 		utils.HandleError(w, "Failed to get summary from DB", http.StatusInternalServerError)
+		logrus.WithError(err).Error("Failed to get summary from DB")
 		return
 	}
 
@@ -140,9 +143,11 @@ func SummarizeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Generate a new summary if it doesn't exist or the model name has changed
 	summary, summaryModelName, err = service.SummaryFunc(ctx, text)
 	if err != nil {
 		utils.HandleError(w, "Failed to generate summary", http.StatusInternalServerError)
+		logrus.WithError(err).Error("Failed to generate summary")
 		return
 	}
 
@@ -153,8 +158,15 @@ func SummarizeHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Save the summary and summary model name in the database
+	logrus.WithFields(logrus.Fields{
+		"url":              url,
+		"summary":          summary,
+		"summaryModelName": summaryModelName,
+	}).Info("Saving summary to DB")
+
 	if err := db.SetSummary(ctx, url, summary, summaryModelName); err != nil {
 		utils.HandleError(w, "Failed to save summary to DB", http.StatusInternalServerError)
+		logrus.WithError(err).Error("Failed to save summary to DB")
 		return
 	}
 
@@ -184,10 +196,15 @@ func generateSummary(ctx context.Context, text string) (string, string, error) {
 	}
 
 	if err := json.Unmarshal(output, &result); err != nil {
+		logrus.WithFields(logrus.Fields{
+			"error":  err,
+			"output": string(output),
+		}).Error("Error parsing JSON output")
 		return "", "", fmt.Errorf("error parsing JSON output: %v, output: %s", err, output)
 	}
 
 	if result.Error != "" {
+		logrus.WithField("error", result.Error).Error("Summarization error")
 		return "", "", fmt.Errorf("summarization error: %s", result.Error)
 	}
 
@@ -197,11 +214,11 @@ func generateSummary(ctx context.Context, text string) (string, string, error) {
 func sendJSONResponse(w http.ResponseWriter, text, modelName string) error {
 	w.Header().Set("Content-Type", "application/json")
 	response := struct {
-		Transcription string `json:"transcription"`
-		ModelName     string `json:"model_name"`
+		Text      string `json:"text"`
+		ModelName string `json:"model_name"`
 	}{
-		Transcription: text,
-		ModelName:     modelName,
+		Text:      text,
+		ModelName: modelName,
 	}
 	err := json.NewEncoder(w).Encode(response)
 	if err != nil {

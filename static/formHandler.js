@@ -141,9 +141,11 @@ document
 			}
 
 			const data = await response.json();
-			document.getElementById("response").innerText = data.summary;
+			document.getElementById("response").innerText = data.text;
 		} catch (error) {
 			// Handle the error gracefully without logging to the console
+			document.getElementById("response").innerText =
+				"An error occurred while processing your request. Please try again later.";
 		}
 	});
 

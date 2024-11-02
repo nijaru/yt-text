@@ -262,19 +262,39 @@ func generateSummary(ctx context.Context, text string) (string, string, error) {
 		return "", "", fmt.Errorf("error executing summarization script: %v, output: %s", err, output)
 	}
 
+	// Extract the final JSON object from the output
+	jsonPart, err := extractFinalJSON(output)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to extract JSON from output: %v", err)
+	}
+
 	var result struct {
 		Summary   string `json:"summary"`
 		Error     string `json:"error"`
 		ModelName string `json:"model_name"`
 	}
 
-	if err := json.Unmarshal(output, &result); err != nil {
+	if err := json.Unmarshal([]byte(jsonPart), &result); err != nil {
+		logrus.WithFields(logrus.Fields{
+			"error":  err,
+			"output": string(output),
+		}).Error("Error parsing JSON output")
 		return "", "", fmt.Errorf("error parsing JSON output: %v, output: %s", err, output)
 	}
 
 	if result.Error != "" {
+		logrus.WithField("error", result.Error).Error("Summarization error")
 		return "", "", fmt.Errorf("summarization error: %s", result.Error)
 	}
 
 	return result.Summary, result.ModelName, nil
+}
+
+func extractFinalJSON(output []byte) (string, error) {
+	re := regexp.MustCompile(`\{.*\}`)
+	matches := re.FindAll(output, -1)
+	if len(matches) == 0 {
+		return "", fmt.Errorf("no JSON found in output")
+	}
+	return string(matches[len(matches)-1]), nil
 }
