@@ -37,8 +37,8 @@ func TestMain(m *testing.M) {
 }
 
 // Mock transcription function
-func mockTranscriptionFunc(ctx context.Context, url string) (string, error) {
-	return "Example transcription text", nil
+func mockTranscriptionFunc(ctx context.Context, url string) (string, string, error) {
+	return "Example transcription text", "base.en", nil
 }
 
 func TestTranscribeHandler(t *testing.T) {
@@ -81,7 +81,7 @@ func TestTranscribeHandler(t *testing.T) {
 		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusOK)
 	}
 
-	expected := `{"transcription":"Example transcription text"}`
+	expected := `{"transcription":"Example transcription text","model_name":"base.en"}`
 	if strings.TrimSpace(rr.Body.String()) != strings.TrimSpace(expected) {
 		t.Errorf("handler returned unexpected body: got %v want %v", rr.Body.String(), expected)
 	}
@@ -221,7 +221,7 @@ func TestConcurrentTranscriptions(t *testing.T) {
 				return
 			}
 
-			expected := `{"transcription":"Example transcription text"}`
+			expected := `{"transcription":"Example transcription text","model_name":"base.en"}`
 			if strings.TrimSpace(rr.Body.String()) != strings.TrimSpace(expected) {
 				errCh <- fmt.Errorf("handler returned unexpected body: got %v want %v", rr.Body.String(), expected)
 				return
@@ -243,4 +243,63 @@ type roundTripperFunc func(req *http.Request) *http.Response
 
 func (f roundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return f(req), nil
+}
+
+func TestSummarizeHandler(t *testing.T) {
+	cfg := &config.Config{
+		TranscribeTimeout: 10 * time.Second,
+		RateLimit:         5,
+		RateLimitInterval: 1 * time.Second,
+		ModelName:         "base.en",
+	}
+	InitHandlers(cfg)
+
+	// Mock HTTP client for URL validation
+	mockClient := &http.Client{
+		Transport: roundTripperFunc(func(req *http.Request) *http.Response {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"text/html"}},
+				Body:       io.NopCloser(strings.NewReader("OK")),
+				Request:    req,
+			}
+		}),
+	}
+	validation.SetHTTPClient(mockClient)
+
+	// Mock transcription and summary functions
+	service.TranscriptionFunc = mockTranscriptionFunc
+	service.SummaryFunc = func(ctx context.Context, text string) (string, string, error) {
+		return "Example summary text", "facebook/bart-large-cnn", nil
+	}
+
+	// Set a transcription in the database
+	ctx := context.Background()
+	url := "http://example.com"
+	text := "Example transcription text"
+	modelName := "base.en"
+	err := db.SetTranscription(ctx, url, text, modelName)
+	if err != nil {
+		t.Fatalf("Failed to set transcription: %v", err)
+	}
+
+	req, err := http.NewRequest("POST", "/summarize", strings.NewReader("url=http://example.com"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	rr := httptest.NewRecorder()
+	handler := http.HandlerFunc(SummarizeHandler)
+
+	handler.ServeHTTP(rr, req)
+
+	if status := rr.Code; status != http.StatusOK {
+		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusOK)
+	}
+
+	expected := `{"transcription":"Example summary text","model_name":"facebook/bart-large-cnn"}`
+	if strings.TrimSpace(rr.Body.String()) != strings.TrimSpace(expected) {
+		t.Errorf("handler returned unexpected body: got %v want %v", rr.Body.String(), expected)
+	}
 }

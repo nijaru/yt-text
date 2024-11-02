@@ -100,3 +100,26 @@ func TestInitializeDB_Error(t *testing.T) {
 		t.Fatal("expected error, got nil")
 	}
 }
+
+func TestSetAndGetSummary(t *testing.T) {
+	ctx := context.Background()
+	url := "http://example.com"
+	summary := "Example summary text"
+	summaryModelName := "facebook/bart-large-cnn"
+
+	err := SetSummary(ctx, url, summary, summaryModelName)
+	if err != nil {
+		t.Fatalf("Failed to set summary: %v", err)
+	}
+
+	retrievedSummary, retrievedSummaryModelName, err := GetSummary(ctx, url)
+	if err != nil {
+		t.Fatalf("Failed to get summary: %v", err)
+	}
+	if retrievedSummary != summary {
+		t.Errorf("expected summary '%s', got '%s'", summary, retrievedSummary)
+	}
+	if retrievedSummaryModelName != summaryModelName {
+		t.Errorf("expected summary model name '%s', got '%s'", summaryModelName, retrievedSummaryModelName)
+	}
+}

@@ -49,7 +49,7 @@ func TranscribeHandler(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), cfg.TranscribeTimeout)
 	defer cancel()
 
-	text, err := service.HandleTranscription(ctx, url, cfg)
+	text, modelName, err := service.HandleTranscription(ctx, url, cfg)
 	if err != nil {
 		handleTranscriptionError(w, url, err)
 		return
@@ -62,7 +62,7 @@ func TranscribeHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	logrus.WithField("url", url).Info("Sending JSON response")
-	if err := sendJSONResponse(w, text); err != nil {
+	if err := sendJSONResponse(w, text, modelName); err != nil {
 		logrus.WithError(err).Error("Failed to send JSON response")
 		return
 	}
@@ -125,7 +125,22 @@ func SummarizeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	summary, err := generateSummary(ctx, text)
+	// Check if summary already exists in the database
+	summary, summaryModelName, err := db.GetSummary(ctx, url)
+	if err != nil {
+		utils.HandleError(w, "Failed to get summary from DB", http.StatusInternalServerError)
+		return
+	}
+
+	if summary != "" && summaryModelName == cfg.ModelName {
+		logrus.WithField("url", url).Info("Summary found in database with the same model name")
+		if err := sendJSONResponse(w, summary, summaryModelName); err != nil {
+			logrus.WithError(err).Error("Failed to send JSON response")
+		}
+		return
+	}
+
+	summary, summaryModelName, err = service.SummaryFunc(ctx, text)
 	if err != nil {
 		utils.HandleError(w, "Failed to generate summary", http.StatusInternalServerError)
 		return
@@ -137,15 +152,21 @@ func SummarizeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Save the summary and summary model name in the database
+	if err := db.SetSummary(ctx, url, summary, summaryModelName); err != nil {
+		utils.HandleError(w, "Failed to save summary to DB", http.StatusInternalServerError)
+		return
+	}
+
 	logrus.WithField("url", url).Info("Sending JSON response")
-	if err := sendJSONResponse(w, summary); err != nil {
+	if err := sendJSONResponse(w, summary, summaryModelName); err != nil {
 		logrus.WithError(err).Error("Failed to send JSON response")
 		return
 	}
 	logrus.WithField("url", url).Info("Summary generation successful")
 }
 
-func generateSummary(ctx context.Context, text string) (string, error) {
+func generateSummary(ctx context.Context, text string) (string, string, error) {
 	cmd := exec.CommandContext(ctx, "python3", "summarize.py", text)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -153,28 +174,35 @@ func generateSummary(ctx context.Context, text string) (string, error) {
 			"error":  err,
 			"output": string(output),
 		}).Error("Error executing summarization script")
-		return "", fmt.Errorf("error executing summarization script: %v, output: %s", err, output)
+		return "", "", fmt.Errorf("error executing summarization script: %v, output: %s", err, output)
 	}
 
 	var result struct {
-		Summary string `json:"summary"`
-		Error   string `json:"error"`
+		Summary   string `json:"summary"`
+		Error     string `json:"error"`
+		ModelName string `json:"model_name"`
 	}
 
 	if err := json.Unmarshal(output, &result); err != nil {
-		return "", fmt.Errorf("error parsing JSON output: %v, output: %s", err, output)
+		return "", "", fmt.Errorf("error parsing JSON output: %v, output: %s", err, output)
 	}
 
 	if result.Error != "" {
-		return "", fmt.Errorf("summarization error: %s", result.Error)
+		return "", "", fmt.Errorf("summarization error: %s", result.Error)
 	}
 
-	return result.Summary, nil
+	return result.Summary, result.ModelName, nil
 }
 
-func sendJSONResponse(w http.ResponseWriter, text string) error {
+func sendJSONResponse(w http.ResponseWriter, text, modelName string) error {
 	w.Header().Set("Content-Type", "application/json")
-	response := map[string]string{"transcription": text}
+	response := struct {
+		Transcription string `json:"transcription"`
+		ModelName     string `json:"model_name"`
+	}{
+		Transcription: text,
+		ModelName:     modelName,
+	}
 	err := json.NewEncoder(w).Encode(response)
 	if err != nil {
 		logrus.WithError(err).Error("Failed to encode JSON response")

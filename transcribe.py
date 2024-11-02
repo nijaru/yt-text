@@ -83,7 +83,7 @@ def main():
     text = retry_with_backoff(lambda: transcribe_audio(filename, model_name))
 
     if return_json:
-        response = {"transcription": text}
+        response = {"transcription": text, "model_name": model_name}
         print(json.dumps(response))
     else:
         filename = retry_with_backoff(lambda: save_to_file(filename, text))

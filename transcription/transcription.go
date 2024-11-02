@@ -32,9 +32,10 @@ func getTranscriptionLock(url string) *transcriptionLock {
 }
 
 type TranscriptionService struct {
-	TranscriptionFunc func(ctx context.Context, url string) (string, error)
+	TranscriptionFunc func(ctx context.Context, url string) (string, string, error)
 	ExecuteScriptFunc func(ctx context.Context, url string) ([]byte, error)
 	ReadFileFunc      func(filename string) (string, error)
+	SummaryFunc       func(ctx context.Context, text string) (string, string, error)
 }
 
 func NewTranscriptionService() *TranscriptionService {
@@ -42,10 +43,11 @@ func NewTranscriptionService() *TranscriptionService {
 		TranscriptionFunc: runTranscriptionScript,
 		ExecuteScriptFunc: executeTranscriptionScript,
 		ReadFileFunc:      readTranscriptionFile,
+		SummaryFunc:       generateSummary,
 	}
 }
 
-func (s *TranscriptionService) HandleTranscription(ctx context.Context, url string, cfg *config.Config) (string, error) {
+func (s *TranscriptionService) HandleTranscription(ctx context.Context, url string, cfg *config.Config) (string, string, error) {
 	lock := getTranscriptionLock(url)
 	lock.mu.Lock()
 	defer lock.mu.Unlock()
@@ -53,7 +55,7 @@ func (s *TranscriptionService) HandleTranscription(ctx context.Context, url stri
 	text, status, err := db.GetTranscription(ctx, url)
 	if err != nil {
 		logrus.WithError(err).WithField("url", url).Error("Failed to get transcription from DB")
-		return "", err
+		return "", "", err
 	}
 
 	if status == "completed" {
@@ -61,12 +63,12 @@ func (s *TranscriptionService) HandleTranscription(ctx context.Context, url stri
 		modelName, err := db.GetModelName(ctx, url)
 		if err != nil {
 			logrus.WithError(err).WithField("url", url).Error("Failed to get model name from DB")
-			return "", err
+			return "", "", err
 		}
 
 		if modelName == cfg.ModelName {
 			logrus.WithField("url", url).Info("Transcription found in database with the same model name")
-			return text, nil
+			return text, modelName, nil
 		}
 
 		logrus.WithField("url", url).Info("Model name mismatch, redoing transcription")
@@ -74,26 +76,26 @@ func (s *TranscriptionService) HandleTranscription(ctx context.Context, url stri
 
 	if err := db.SetTranscriptionStatus(ctx, url, "in_progress"); err != nil {
 		logrus.WithError(err).WithField("url", url).Error("Failed to set transcription status to in_progress")
-		return "", fmt.Errorf("error setting transcription status: %v", err)
+		return "", "", fmt.Errorf("error setting transcription status: %v", err)
 	}
 
 	if err := validation.ValidateURL(url); err != nil {
-		return "", err
+		return "", "", err
 	}
 
-	text, err = s.TranscriptionFunc(ctx, url)
+	text, modelName, err := s.TranscriptionFunc(ctx, url)
 	if err != nil {
 		db.SetTranscriptionStatus(ctx, url, "failed")
 		logrus.WithError(err).WithField("url", url).Error("Transcription script failed")
-		return "", err
+		return "", "", err
 	}
 
-	if err := saveTranscription(ctx, url, text, cfg.ModelName); err != nil {
-		return "", err
+	if err := saveTranscription(ctx, url, text, modelName); err != nil {
+		return "", "", err
 	}
 
 	logrus.WithField("url", url).Info("Transcription saved successfully")
-	return text, nil
+	return text, modelName, nil
 }
 
 func saveTranscription(ctx context.Context, url, text, modelName string) error {
@@ -110,30 +112,31 @@ func saveTranscription(ctx context.Context, url, text, modelName string) error {
 	return nil
 }
 
-func runTranscriptionScript(ctx context.Context, url string) (string, error) {
+func runTranscriptionScript(ctx context.Context, url string) (string, string, error) {
 	logrus.WithField("url", url).Info("Starting transcription")
 
 	output, err := executeTranscriptionWithRetry(ctx, url)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
 	// Extract JSON part from the output
 	jsonPart, err := extractJSON(output)
 	if err != nil {
-		return "", fmt.Errorf("failed to extract JSON from output: %v", err)
+		return "", "", fmt.Errorf("failed to extract JSON from output: %v", err)
 	}
 
 	// Parse the JSON
 	var response struct {
 		Transcription string `json:"transcription"`
+		ModelName     string `json:"model_name"`
 	}
 	if err := json.Unmarshal([]byte(jsonPart), &response); err != nil {
-		return "", fmt.Errorf("failed to parse JSON: %v", err)
+		return "", "", fmt.Errorf("failed to parse JSON: %v", err)
 	}
 
 	logrus.WithField("url", url).Info("Transcription completed successfully")
-	return response.Transcription, nil
+	return response.Transcription, response.ModelName, nil
 }
 
 func extractJSON(output []byte) (string, error) {
@@ -246,4 +249,32 @@ func validateTranscriptionFile(filename string) error {
 		return fmt.Errorf("error: failed to stat file: %v", err)
 	}
 	return nil
+}
+
+func generateSummary(ctx context.Context, text string) (string, string, error) {
+	cmd := exec.CommandContext(ctx, "python3", "summarize.py", text)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		logrus.WithFields(logrus.Fields{
+			"error":  err,
+			"output": string(output),
+		}).Error("Error executing summarization script")
+		return "", "", fmt.Errorf("error executing summarization script: %v, output: %s", err, output)
+	}
+
+	var result struct {
+		Summary   string `json:"summary"`
+		Error     string `json:"error"`
+		ModelName string `json:"model_name"`
+	}
+
+	if err := json.Unmarshal(output, &result); err != nil {
+		return "", "", fmt.Errorf("error parsing JSON output: %v, output: %s", err, output)
+	}
+
+	if result.Error != "" {
+		return "", "", fmt.Errorf("summarization error: %s", result.Error)
+	}
+
+	return result.Summary, result.ModelName, nil
 }

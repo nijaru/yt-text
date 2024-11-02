@@ -8,11 +8,11 @@ import (
 
 func TestRunTranscriptionScript(t *testing.T) {
 	service := &TranscriptionService{
-		TranscriptionFunc: func(ctx context.Context, url string) (string, error) {
-			return "Example transcription text", nil
+		TranscriptionFunc: func(ctx context.Context, url string) (string, string, error) {
+			return "Example transcription text", "base.en", nil
 		},
 		ExecuteScriptFunc: func(ctx context.Context, url string) ([]byte, error) {
-			response := map[string]string{"transcription": "Example transcription text"}
+			response := map[string]string{"transcription": "Example transcription text", "model_name": "base.en"}
 			output, _ := json.Marshal(response)
 			return output, nil
 		},
@@ -22,14 +22,18 @@ func TestRunTranscriptionScript(t *testing.T) {
 	}
 
 	// Test TranscriptionFunc
-	text, err := service.TranscriptionFunc(context.Background(), "http://example.com")
+	text, modelName, err := service.TranscriptionFunc(context.Background(), "http://example.com")
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
 
-	expected := "Example transcription text"
-	if text != expected {
-		t.Errorf("expected '%s', got '%s'", expected, text)
+	expectedText := "Example transcription text"
+	expectedModelName := "base.en"
+	if text != expectedText {
+		t.Errorf("expected '%s', got '%s'", expectedText, text)
+	}
+	if modelName != expectedModelName {
+		t.Errorf("expected '%s', got '%s'", expectedModelName, modelName)
 	}
 
 	// Test ExecuteScriptFunc
@@ -43,9 +47,11 @@ func TestRunTranscriptionScript(t *testing.T) {
 		t.Fatalf("expected valid JSON, got %v", err)
 	}
 
-	expectedScriptOutput := "Example transcription text"
-	if response["transcription"] != expectedScriptOutput {
-		t.Errorf("expected '%s', got '%s'", expectedScriptOutput, response["transcription"])
+	if response["transcription"] != expectedText {
+		t.Errorf("expected '%s', got '%s'", expectedText, response["transcription"])
+	}
+	if response["model_name"] != expectedModelName {
+		t.Errorf("expected '%s', got '%s'", expectedModelName, response["model_name"])
 	}
 
 	// Test ReadFileFunc
@@ -54,8 +60,7 @@ func TestRunTranscriptionScript(t *testing.T) {
 		t.Fatalf("expected no error, got %v", err)
 	}
 
-	expectedFileContent := "Example transcription text"
-	if fileContent != expectedFileContent {
-		t.Errorf("expected '%s', got '%s'", expectedFileContent, fileContent)
+	if fileContent != expectedText {
+		t.Errorf("expected '%s', got '%s'", expectedText, fileContent)
 	}
 }

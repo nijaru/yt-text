@@ -39,7 +39,9 @@ func InitializeDB(dbPath string) error {
                     url TEXT NOT NULL UNIQUE,
                     text TEXT,
                     status TEXT NOT NULL DEFAULT 'pending',
-                    model_name TEXT NOT NULL DEFAULT ''
+                    model_name TEXT NOT NULL DEFAULT '',
+                    summary TEXT,
+                    summary_model_name TEXT
     )`)
 	if err != nil {
 		DB.Close() // Close the database connection in case of an error
@@ -148,6 +150,46 @@ func DeleteTranscription(ctx context.Context, url string) error {
 	if err != nil {
 		tx.Rollback()
 		return fmt.Errorf("error executing delete statement: %v", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("error committing transaction: %v", err)
+	}
+
+	return nil
+}
+
+func GetSummary(ctx context.Context, url string) (string, string, error) {
+	var summary sql.NullString
+	var summaryModelName sql.NullString
+	err := DB.QueryRowContext(ctx, "SELECT summary, summary_model_name FROM urls WHERE url = ?", url).Scan(&summary, &summaryModelName)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return "", "", nil
+		}
+		return "", "", fmt.Errorf("error querying database: %v", err)
+	}
+
+	return summary.String, summaryModelName.String, nil
+}
+
+func SetSummary(ctx context.Context, url, summary, summaryModelName string) error {
+	tx, err := DB.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("error beginning transaction: %v", err)
+	}
+
+	stmt, err := tx.PrepareContext(ctx, "INSERT INTO urls (url, summary, summary_model_name) VALUES (?, ?, ?) ON CONFLICT(url) DO UPDATE SET summary=excluded.summary, summary_model_name=excluded.summary_model_name")
+	if err != nil {
+		tx.Rollback()
+		return fmt.Errorf("error preparing statement: %v", err)
+	}
+	defer stmt.Close()
+
+	_, err = stmt.ExecContext(ctx, url, summary, summaryModelName)
+	if err != nil {
+		tx.Rollback()
+		return fmt.Errorf("error executing statement: %v", err)
 	}
 
 	if err := tx.Commit(); err != nil {
