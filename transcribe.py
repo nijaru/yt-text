@@ -1,4 +1,5 @@
 import argparse
+import json
 import os
 import random
 import time
@@ -69,15 +70,24 @@ def main():
     parser.add_argument(
         "--model", type=str, default="base.en", help="Name of the Whisper model to use"
     )
+    parser.add_argument(
+        "--json", action="store_true", help="Return the transcription as a JSON object"
+    )
 
     args = parser.parse_args()
     url = args.url
     model_name = args.model
+    return_json = args.json
 
     filename = retry_with_backoff(lambda: download_audio(url))
     text = retry_with_backoff(lambda: transcribe_audio(filename, model_name))
-    filename = retry_with_backoff(lambda: save_to_file(filename, text))
-    print(filename)
+
+    if return_json:
+        response = {"transcription": text}
+        print(json.dumps(response))
+    else:
+        filename = retry_with_backoff(lambda: save_to_file(filename, text))
+        print(filename)
 
 
 if __name__ == "__main__":

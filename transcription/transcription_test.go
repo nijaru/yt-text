@@ -2,6 +2,7 @@ package transcription
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 )
 
@@ -11,7 +12,9 @@ func TestRunTranscriptionScript(t *testing.T) {
 			return "Example transcription text", nil
 		},
 		ExecuteScriptFunc: func(ctx context.Context, url string) ([]byte, error) {
-			return []byte("transcription.txt"), nil
+			response := map[string]string{"transcription": "Example transcription text"}
+			output, _ := json.Marshal(response)
+			return output, nil
 		},
 		ReadFileFunc: func(filename string) (string, error) {
 			return "Example transcription text", nil
@@ -35,9 +38,14 @@ func TestRunTranscriptionScript(t *testing.T) {
 		t.Fatalf("expected no error, got %v", err)
 	}
 
-	expectedScriptOutput := "transcription.txt"
-	if string(scriptOutput) != expectedScriptOutput {
-		t.Errorf("expected '%s', got '%s'", expectedScriptOutput, string(scriptOutput))
+	var response map[string]string
+	if err := json.Unmarshal(scriptOutput, &response); err != nil {
+		t.Fatalf("expected valid JSON, got %v", err)
+	}
+
+	expectedScriptOutput := "Example transcription text"
+	if response["transcription"] != expectedScriptOutput {
+		t.Errorf("expected '%s', got '%s'", expectedScriptOutput, response["transcription"])
 	}
 
 	// Test ReadFileFunc

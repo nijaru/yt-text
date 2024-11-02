@@ -102,6 +102,51 @@ document
 		}
 	});
 
+document
+	.getElementById("summarizeButton")
+	.addEventListener("click", async () => {
+		const url = document.getElementById("url").value;
+
+		// Validate URL format
+		if (!validateURL(url)) {
+			document.getElementById("response").innerText =
+				"Invalid URL format. Please enter a valid URL.";
+			return;
+		}
+
+		try {
+			const response = await fetch("/summarize", {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/x-www-form-urlencoded",
+				},
+				body: new URLSearchParams({
+					url: url,
+				}),
+			});
+
+			if (!response.ok) {
+				const text = await response.text();
+				if (response.status === 400) {
+					document.getElementById("response").innerText =
+						"Invalid URL. Please enter a valid URL.";
+				} else if (response.status === 429) {
+					document.getElementById("response").innerText =
+						"Too many requests. Please try again later.";
+				} else {
+					document.getElementById("response").innerText =
+						"An error occurred while processing your request. Please try again later.";
+				}
+				return; // Do not throw an error to prevent logging to the console
+			}
+
+			const data = await response.json();
+			document.getElementById("response").innerText = data.summary;
+		} catch (error) {
+			// Handle the error gracefully without logging to the console
+		}
+	});
+
 window.addEventListener("beforeunload", () => {
 	if (controller) {
 		controller.abort(); // Abort the fetch request if the user leaves the page
