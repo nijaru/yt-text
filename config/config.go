@@ -20,6 +20,7 @@ type Config struct {
 	RateLimit         int
 	RateLimitInterval time.Duration
 	ModelName         string
+	SummaryModelName  string
 }
 
 func LoadConfig() *Config {
@@ -33,6 +34,7 @@ func LoadConfig() *Config {
 		RateLimit:         getEnvAsInt("RATE_LIMIT", 5),
 		RateLimitInterval: getEnvAsDuration("RATE_LIMIT_INTERVAL", 1*time.Second),
 		ModelName:         GetEnv("MODEL_NAME", "base.en"),
+		SummaryModelName:  GetEnv("SUMMARY_MODEL_NAME", "facebook/bart-large-cnn"),
 	}
 }
 
