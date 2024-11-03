@@ -201,9 +201,7 @@ func SetSummary(ctx context.Context, url, summary, summaryModelName string) erro
 	}
 
 	logrus.WithFields(logrus.Fields{
-		"url":              url,
-		"summary":          summary,
-		"summaryModelName": summaryModelName,
+		"url": url,
 	}).Info("Summary saved to DB successfully")
 
 	return nil

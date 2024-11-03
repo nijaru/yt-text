@@ -158,19 +158,12 @@ func SummarizeHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Save the summary and summary model name in the database
-	logrus.WithFields(logrus.Fields{
-		"url":              url,
-		"summary":          summary,
-		"summaryModelName": summaryModelName,
-	}).Info("Saving summary to DB")
-
 	if err := db.SetSummary(ctx, url, summary, summaryModelName); err != nil {
 		utils.HandleError(w, "Failed to save summary to DB", http.StatusInternalServerError)
 		logrus.WithError(err).Error("Failed to save summary to DB")
 		return
 	}
 
-	logrus.WithField("url", url).Info("Sending JSON response")
 	if err := sendJSONResponse(w, summary, summaryModelName); err != nil {
 		logrus.WithError(err).Error("Failed to send JSON response")
 		return
