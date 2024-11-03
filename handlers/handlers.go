@@ -214,11 +214,11 @@ func generateSummary(ctx context.Context, text string) (string, string, error) {
 func sendJSONResponse(w http.ResponseWriter, text, modelName string) error {
 	w.Header().Set("Content-Type", "application/json")
 	response := struct {
-		Text      string `json:"text"`
-		ModelName string `json:"model_name"`
+		Transcription string `json:"transcription"`
+		ModelName     string `json:"model_name"`
 	}{
-		Text:      text,
-		ModelName: modelName,
+		Transcription: text,
+		ModelName:     modelName,
 	}
 	err := json.NewEncoder(w).Encode(response)
 	if err != nil {
