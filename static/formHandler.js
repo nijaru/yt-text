@@ -64,13 +64,13 @@ document
 
 			const data = await response.json();
 			const responseDiv = document.getElementById("response");
-			responseDiv.innerText = data.transcription;
+			responseDiv.innerText = data.text;
 
 			const copyButton = document.getElementById("copyButton");
 			copyButton.classList.remove("hidden"); // Show copy button
 			copyButton.onclick = () => {
 				navigator.clipboard
-					.writeText(data.transcription)
+					.writeText(data.text)
 					.then(() => {
 						alert("Text copied to clipboard");
 					})
@@ -83,7 +83,7 @@ document
 			const downloadButton = document.getElementById("downloadButton");
 			downloadButton.classList.remove("hidden"); // Show download button
 			downloadButton.onclick = () => {
-				const blob = new Blob([data.transcription], {
+				const blob = new Blob([data.text], {
 					type: "text/plain",
 				});
 				const link = document.createElement("a");
