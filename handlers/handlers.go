@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os/exec"
 
 	"github.com/nijaru/yt-text/config"
 	"github.com/nijaru/yt-text/db"
@@ -179,39 +178,6 @@ func SummarizeHandler(w http.ResponseWriter, r *http.Request) {
 		logrus.WithError(err).WithField("url", url).Error("Failed to send JSON response")
 	}
 	logrus.WithField("url", url).Info("Summary generation successful")
-}
-
-func generateSummary(ctx context.Context, text string) (string, string, error) {
-	cmd := exec.CommandContext(ctx, "python3", "summarize.py", text)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		logrus.WithFields(logrus.Fields{
-			"error":  err,
-			"output": string(output),
-		}).Error("Error executing summarization script")
-		return "", "", fmt.Errorf("error executing summarization script: %v, output: %s", err, output)
-	}
-
-	var result struct {
-		Summary   string `json:"summary"`
-		Error     string `json:"error"`
-		ModelName string `json:"model_name"`
-	}
-
-	if err := json.Unmarshal(output, &result); err != nil {
-		logrus.WithFields(logrus.Fields{
-			"error":  err,
-			"output": string(output),
-		}).Error("Error parsing JSON output")
-		return "", "", fmt.Errorf("error parsing JSON output: %v, output: %s", err, output)
-	}
-
-	if result.Error != "" {
-		logrus.WithField("error", result.Error).Error("Summarization error")
-		return "", "", fmt.Errorf("summarization error: %s", result.Error)
-	}
-
-	return result.Summary, result.ModelName, nil
 }
 
 func sendJSONResponse(w http.ResponseWriter, text, modelName string) error {

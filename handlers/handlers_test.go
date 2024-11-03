@@ -81,7 +81,7 @@ func TestTranscribeHandler(t *testing.T) {
 		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusOK)
 	}
 
-	expected := `{"transcription":"Example transcription text","model_name":"base.en"}`
+	expected := `{"text":"Example transcription text","model_name":"base.en"}`
 	if strings.TrimSpace(rr.Body.String()) != strings.TrimSpace(expected) {
 		t.Errorf("handler returned unexpected body: got %v want %v", rr.Body.String(), expected)
 	}
@@ -221,7 +221,7 @@ func TestConcurrentTranscriptions(t *testing.T) {
 				return
 			}
 
-			expected := `{"transcription":"Example transcription text","model_name":"base.en"}`
+			expected := `{"text":"Example transcription text","model_name":"base.en"}`
 			if strings.TrimSpace(rr.Body.String()) != strings.TrimSpace(expected) {
 				errCh <- fmt.Errorf("handler returned unexpected body: got %v want %v", rr.Body.String(), expected)
 				return
@@ -298,7 +298,7 @@ func TestSummarizeHandler(t *testing.T) {
 		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusOK)
 	}
 
-	expected := `{"transcription":"Example summary text","model_name":"facebook/bart-large-cnn"}`
+	expected := `{"text":"Example summary text","model_name":"facebook/bart-large-cnn"}`
 	if strings.TrimSpace(rr.Body.String()) != strings.TrimSpace(expected) {
 		t.Errorf("handler returned unexpected body: got %v want %v", rr.Body.String(), expected)
 	}
