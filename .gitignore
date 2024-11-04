@@ -176,7 +176,7 @@ cython_debug/
 /vendor/
 
 # Go modules
-/go.sum
+#/go.sum
 /go.work
 /go.work.sum
 
