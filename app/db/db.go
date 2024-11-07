@@ -9,6 +9,7 @@ import (
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
+	"github.com/nijaru/yt-text/errors"
 	"github.com/sirupsen/logrus"
 )
 
@@ -48,18 +49,34 @@ func InitializeDB(dbPath string) error {
 		return fmt.Errorf("error creating table: %v", err)
 	}
 
+	_, err = DB.Exec(`CREATE INDEX IF NOT EXISTS idx_urls_url ON urls(url)`)
+	if err != nil {
+		DB.Close()
+		return fmt.Errorf("error creating index: %v", err)
+	}
+
+	// Add context with timeout for initialization
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Test connection with timeout
+	if err := DB.PingContext(ctx); err != nil {
+		return fmt.Errorf("error connecting to database: %v", err)
+	}
+
 	return nil
 }
 
 func GetTranscription(ctx context.Context, url string) (string, string, error) {
 	var text sql.NullString
 	var status string
+
 	err := DB.QueryRowContext(ctx, "SELECT text, status FROM urls WHERE url = ?", url).Scan(&text, &status)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return "", "pending", nil
 		}
-		return "", "", fmt.Errorf("error querying database: %v", err)
+		return "", "", errors.ErrDatabaseOperation(fmt.Errorf("querying transcription: %w", err))
 	}
 
 	if !text.Valid {
@@ -84,24 +101,26 @@ func GetModelName(ctx context.Context, url string) (string, error) {
 func SetTranscription(ctx context.Context, url, text, modelName string) error {
 	tx, err := DB.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("error beginning transaction: %v", err)
+		return errors.ErrDatabaseOperation(fmt.Errorf("beginning transaction: %w", err))
 	}
+	defer tx.Rollback()
 
-	stmt, err := tx.PrepareContext(ctx, "INSERT INTO urls (url, text, status, model_name) VALUES (?, ?, 'completed', ?) ON CONFLICT(url) DO UPDATE SET text=excluded.text, status='completed', model_name=excluded.model_name")
+	stmt, err := tx.PrepareContext(ctx, `
+		INSERT INTO urls (url, text, status, model_name)
+		VALUES (?, ?, 'completed', ?)
+		ON CONFLICT(url)
+		DO UPDATE SET text=excluded.text, status='completed', model_name=excluded.model_name`)
 	if err != nil {
-		tx.Rollback()
-		return fmt.Errorf("error preparing statement: %v", err)
+		return errors.ErrDatabaseOperation(fmt.Errorf("preparing statement: %w", err))
 	}
 	defer stmt.Close()
 
-	_, err = stmt.ExecContext(ctx, url, text, modelName)
-	if err != nil {
-		tx.Rollback()
-		return fmt.Errorf("error executing statement: %v", err)
+	if _, err = stmt.ExecContext(ctx, url, text, modelName); err != nil {
+		return errors.ErrDatabaseOperation(fmt.Errorf("executing statement: %w", err))
 	}
 
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("error committing transaction: %v", err)
+		return errors.ErrDatabaseOperation(fmt.Errorf("committing transaction: %w", err))
 	}
 
 	return nil

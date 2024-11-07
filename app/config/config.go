@@ -80,6 +80,15 @@ func ValidateConfig(cfg *Config) error {
 	if cfg.DBPath == "" {
 		return errors.New("database path is required")
 	}
+	if cfg.RateLimit <= 0 {
+		return errors.New("rate limit must be greater than 0")
+	}
+	if cfg.RateLimitInterval <= 0 {
+		return errors.New("rate limit interval must be greater than 0")
+	}
+	if cfg.ModelName == "" {
+		return errors.New("model name is required")
+	}
 	if cfg.TranscribeTimeout <= 0 {
 		return errors.New("transcribe timeout must be greater than 0")
 	}

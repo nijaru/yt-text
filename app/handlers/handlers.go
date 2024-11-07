@@ -3,16 +3,22 @@ package handlers
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 
 	"github.com/nijaru/yt-text/config"
 	"github.com/nijaru/yt-text/db"
+	"github.com/nijaru/yt-text/errors"
+	"github.com/nijaru/yt-text/middleware"
 	"github.com/nijaru/yt-text/transcription"
 	"github.com/nijaru/yt-text/utils"
 	"github.com/nijaru/yt-text/validation"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/time/rate"
+)
+
+const (
+	methodGET  = "GET"
+	methodPOST = "POST"
 )
 
 var (
@@ -28,20 +34,19 @@ func InitHandlers(config *config.Config) {
 }
 
 func TranscribeHandler(w http.ResponseWriter, r *http.Request) {
-	logrus.WithFields(logrus.Fields{
-		"method": r.Method,
-		"path":   r.URL.Path,
-	}).Info("Received request")
+	logger := logrus.WithFields(logrus.Fields{
+		"request_id": r.Context().Value(middleware.RequestIDKey),
+		"handler":    "TranscribeHandler",
+	})
 
 	if r.Method != http.MethodPost {
-		utils.HandleError(w, "Invalid request method", http.StatusMethodNotAllowed)
+		utils.RespondWithError(w, errors.New(http.StatusMethodNotAllowed, "Method not allowed", nil))
 		return
 	}
 
 	url := r.FormValue("url")
-
-	if err := validateAndRateLimit(w, url); err != nil {
-		logrus.WithError(err).Error("Validation or rate limit error")
+	if err := validateAndRateLimit(url); err != nil {
+		utils.RespondWithError(w, err)
 		return
 	}
 
@@ -50,46 +55,32 @@ func TranscribeHandler(w http.ResponseWriter, r *http.Request) {
 
 	text, modelName, err := service.HandleTranscription(ctx, url, cfg)
 	if err != nil {
-		handleTranscriptionError(w, url, err)
+		logger.WithError(err).Error("Transcription failed")
+		utils.RespondWithError(w, errors.ErrTranscriptionFailed(err))
 		return
 	}
 
-	if ctx.Err() != nil {
-		utils.HandleError(w, "Request timed out", http.StatusGatewayTimeout)
-		logrus.WithError(ctx.Err()).Error("Context cancelled before sending response")
-		return
+	response := struct {
+		Text      string `json:"text"`
+		ModelName string `json:"model_name"`
+	}{
+		Text:      text,
+		ModelName: modelName,
 	}
 
-	logrus.WithField("url", url).Info("Sending JSON response")
-	if err := sendJSONResponse(w, text, modelName); err != nil {
-		logrus.WithError(err).Error("Failed to send JSON response")
-		return
-	}
-	logrus.WithField("url", url).Info("Transcription successful")
+	utils.RespondWithJSON(w, http.StatusOK, response)
 }
 
-func validateAndRateLimit(w http.ResponseWriter, url string) error {
+func validateAndRateLimit(url string) error {
 	if err := validation.ValidateURL(url); err != nil {
-		utils.HandleError(w, err.Error(), http.StatusBadRequest)
-		return fmt.Errorf("URL validation failed: %v", err)
+		return err
 	}
 
 	if !rateLimiter.Allow() {
-		utils.HandleError(w, "Rate limit exceeded", http.StatusTooManyRequests)
-		return fmt.Errorf("Rate limit exceeded for URL: %s", url)
+		return errors.ErrRateLimitExceeded
 	}
 
 	return nil
-}
-
-func handleTranscriptionError(w http.ResponseWriter, url string, err error) {
-	if validationErr, ok := err.(*validation.ValidationError); ok {
-		utils.HandleError(w, "Invalid URL", http.StatusBadRequest)
-		logrus.WithError(validationErr).WithField("url", url).Error("URL validation failed")
-	} else {
-		utils.HandleError(w, "An error occurred while processing your request. Please try again later.", http.StatusInternalServerError)
-		logrus.WithError(err).WithField("url", url).Error("Transcription failed")
-	}
 }
 
 func SummarizeHandler(w http.ResponseWriter, r *http.Request) {
@@ -99,8 +90,7 @@ func SummarizeHandler(w http.ResponseWriter, r *http.Request) {
 	}).Info("Received request")
 
 	if r.Method != http.MethodPost {
-		utils.HandleError(w, "Invalid request method", http.StatusMethodNotAllowed)
-		logrus.WithField("method", r.Method).Warn("Invalid request method")
+		utils.RespondWithError(w, errors.New(http.StatusMethodNotAllowed, "Method not allowed", nil))
 		return
 	}
 

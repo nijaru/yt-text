@@ -15,6 +15,7 @@ import (
 
 	"github.com/nijaru/yt-text/config"
 	"github.com/nijaru/yt-text/db"
+	"github.com/nijaru/yt-text/middleware"
 	"github.com/nijaru/yt-text/utils"
 	"github.com/nijaru/yt-text/validation"
 	"github.com/sirupsen/logrus"
@@ -48,34 +49,44 @@ func NewTranscriptionService() *TranscriptionService {
 }
 
 func (s *TranscriptionService) HandleTranscription(ctx context.Context, url string, cfg *config.Config) (string, string, error) {
+	logger := logrus.WithFields(logrus.Fields{
+		"url":        url,
+		"request_id": ctx.Value(middleware.RequestIDKey),
+		"model_name": cfg.ModelName,
+	})
+
+	logger.Info("Starting transcription process")
+
 	lock := getTranscriptionLock(url)
 	lock.mu.Lock()
 	defer lock.mu.Unlock()
 
 	text, status, err := db.GetTranscription(ctx, url)
 	if err != nil {
-		logrus.WithError(err).WithField("url", url).Error("Failed to get transcription from DB")
+		logger.WithError(err).Error("Failed to get transcription from DB")
 		return "", "", err
 	}
 
 	if status == "completed" {
-		// Check if the model name in the database is different from the current model name
 		modelName, err := db.GetModelName(ctx, url)
 		if err != nil {
-			logrus.WithError(err).WithField("url", url).Error("Failed to get model name from DB")
+			logger.WithError(err).Error("Failed to get model name from DB")
 			return "", "", err
 		}
 
 		if modelName == cfg.ModelName {
-			logrus.WithField("url", url).Info("Transcription found in database with the same model name")
+			logger.Info("Using existing transcription from database")
 			return text, modelName, nil
 		}
 
-		logrus.WithField("url", url).Info("Model name mismatch, redoing transcription")
+		logger.WithFields(logrus.Fields{
+			"current_model": cfg.ModelName,
+			"stored_model":  modelName,
+		}).Info("Model mismatch, initiating new transcription")
 	}
 
 	if err := db.SetTranscriptionStatus(ctx, url, "in_progress"); err != nil {
-		logrus.WithError(err).WithField("url", url).Error("Failed to set transcription status to in_progress")
+		logger.WithError(err).Error("Failed to set transcription status to in_progress")
 		return "", "", fmt.Errorf("error setting transcription status: %v", err)
 	}
 
@@ -86,7 +97,7 @@ func (s *TranscriptionService) HandleTranscription(ctx context.Context, url stri
 	text, modelName, err := s.TranscriptionFunc(ctx, url)
 	if err != nil {
 		db.SetTranscriptionStatus(ctx, url, "failed")
-		logrus.WithError(err).WithField("url", url).Error("Transcription script failed")
+		logger.WithError(err).Error("Transcription script failed")
 		return "", "", err
 	}
 
@@ -94,7 +105,7 @@ func (s *TranscriptionService) HandleTranscription(ctx context.Context, url stri
 		return "", "", err
 	}
 
-	logrus.WithField("url", url).Info("Transcription saved successfully")
+	logger.Info("Transcription saved successfully")
 	return text, modelName, nil
 }
 
