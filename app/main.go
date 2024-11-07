@@ -69,7 +69,8 @@ func main() {
 	mux.HandleFunc("/static/", serveStaticFiles)
 	mux.HandleFunc("/", serveIndex)
 	mux.HandleFunc("/transcribe", handlers.TranscribeHandler)
-	mux.HandleFunc("/summarize", handlers.SummarizeHandler)
+	// disable since it uses ~2.25GB RAM on test video
+	// mux.HandleFunc("/summarize", handlers.SummarizeHandler)
 
 	loggedMux := middleware.LoggingMiddleware(mux)
 

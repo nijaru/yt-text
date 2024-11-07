@@ -102,6 +102,8 @@ document
 		}
 	});
 
+// Remove the event listener for the summarize button
+/*
 document
 	.getElementById("summarizeButton")
 	.addEventListener("click", async () => {
@@ -148,6 +150,7 @@ document
 				"An error occurred while processing your request. Please try again later.";
 		}
 	});
+*/
 
 window.addEventListener("beforeunload", () => {
 	if (controller) {
