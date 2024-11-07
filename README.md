@@ -16,7 +16,7 @@ This tool operates as a web server that accepts a YouTube URL (or any other URL 
 1. Clone the repository:
     ```sh
     git clone https://github.com/yourusername/yt-text.git
-    cd yt-text
+    cd yt-text/app
     ```
 2. (Optional) Create a virtual environment and activate it:
     ```sh
