@@ -1,11 +1,35 @@
 services:
     app:
         build:
-            context: ./app
+            context: .
+            target: runner
+        image: yt-text:latest
         ports:
             - "8080:8080"
         volumes:
-            - ./data:/root/data
+            - ./data:/app/data
+            - ./logs:/app/logs
         environment:
-            - DB_PATH=/root/data/urls.db
+            - DB_PATH=/app/data/urls.db
+            - LOG_DIR=/app/logs
+            - PYTHONDONTWRITEBYTECODE=1
+            - PYTHONUNBUFFERED=1
         restart: unless-stopped
+        security_opt:
+            - no-new-privileges:true
+        read_only: true
+        tmpfs:
+            - /tmp
+        deploy:
+            resources:
+                limits:
+                    cpus: "4.0"
+                    memory: 8G
+                reservations:
+                    cpus: "0.5"
+                    memory: 1G
+        logging:
+            driver: "json-file"
+            options:
+                max-size: "10m"
+                max-file: "3"

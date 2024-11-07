@@ -15,13 +15,24 @@ import (
 
 	"github.com/nijaru/yt-text/config"
 	"github.com/nijaru/yt-text/db"
+	"github.com/nijaru/yt-text/errors"
 	"github.com/nijaru/yt-text/middleware"
 	"github.com/nijaru/yt-text/utils"
 	"github.com/nijaru/yt-text/validation"
 	"github.com/sirupsen/logrus"
 )
 
-var transcriptionLocks sync.Map
+const (
+	maxRetries     = 3
+	initialBackoff = 2 * time.Second
+	maxBackoff     = 30 * time.Second
+	backoffFactor  = 2.0
+)
+
+var (
+	transcriptionLocks sync.Map
+	execCommand        = exec.Command
+)
 
 type transcriptionLock struct {
 	mu sync.Mutex
@@ -40,12 +51,12 @@ type TranscriptionService struct {
 }
 
 func NewTranscriptionService() *TranscriptionService {
-	return &TranscriptionService{
-		TranscriptionFunc: runTranscriptionScript,
-		ExecuteScriptFunc: executeTranscriptionScript,
-		ReadFileFunc:      readTranscriptionFile,
-		SummaryFunc:       generateSummary,
-	}
+	s := &TranscriptionService{}
+	s.TranscriptionFunc = s.runTranscriptionScript
+	s.ExecuteScriptFunc = executeTranscriptionScript
+	s.ReadFileFunc = readTranscriptionFile
+	s.SummaryFunc = generateSummary
+	return s
 }
 
 func (s *TranscriptionService) HandleTranscription(ctx context.Context, url string, cfg *config.Config) (string, string, error) {
@@ -110,23 +121,25 @@ func (s *TranscriptionService) HandleTranscription(ctx context.Context, url stri
 }
 
 func saveTranscription(ctx context.Context, url, text, modelName string) error {
+	if url == "" {
+		return errors.ErrInvalidRequest("URL cannot be empty")
+	}
+
 	if err := db.SetTranscription(ctx, url, text, modelName); err != nil {
-		logrus.WithError(err).WithField("url", url).Error("Failed to save transcription")
-		return fmt.Errorf("error saving transcription: %v", err)
+		return fmt.Errorf("error saving transcription: %w", err)
 	}
 
 	if err := db.SetTranscriptionStatus(ctx, url, "completed"); err != nil {
-		logrus.WithError(err).WithField("url", url).Error("Failed to set transcription status to completed")
-		return fmt.Errorf("error setting transcription status: %v", err)
+		return fmt.Errorf("error setting transcription status: %w", err)
 	}
 
 	return nil
 }
 
-func runTranscriptionScript(ctx context.Context, url string) (string, string, error) {
+func (s *TranscriptionService) runTranscriptionScript(ctx context.Context, url string) (string, string, error) {
 	logrus.WithField("url", url).Info("Starting transcription")
 
-	output, err := executeTranscriptionWithRetry(ctx, url)
+	output, err := s.executeTranscriptionWithRetry(ctx, url)
 	if err != nil {
 		return "", "", err
 	}
@@ -159,21 +172,14 @@ func extractJSON(output []byte) (string, error) {
 	return string(matches), nil
 }
 
-func executeTranscriptionWithRetry(ctx context.Context, url string) ([]byte, error) {
-	const (
-		maxRetries     = 3
-		initialBackoff = 2 * time.Second
-		maxBackoff     = 30 * time.Second
-		backoffFactor  = 2.0
-	)
-
+func (s *TranscriptionService) executeTranscriptionWithRetry(ctx context.Context, url string) ([]byte, error) {
 	var (
 		output []byte
 		err    error
 	)
 
 	for attempt := 1; attempt <= maxRetries; attempt++ {
-		output, err = executeTranscriptionScript(ctx, url)
+		output, err = s.ExecuteScriptFunc(ctx, url)
 		if err == nil {
 			break
 		}
@@ -214,11 +220,24 @@ func executeTranscriptionWithRetry(ctx context.Context, url string) ([]byte, err
 }
 
 func executeTranscriptionScript(ctx context.Context, url string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, "uv", "run", "/app/scripts/transcribe.py", url, "--json")
+	cmd := execCommand("uv", "run", "/app/scripts/transcribe.py", url, "--json")
+	cmd.Env = append(os.Environ(),
+		"PYTHONUNBUFFERED=1",
+		"TRANSFORMERS_CACHE=/tmp",
+		"HF_HOME=/tmp",
+		"XDG_CACHE_HOME=/tmp")
+
+	// Create a pipe for the command output
+	cmd.Dir = "/app"
+
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return nil, fmt.Errorf("error executing transcription script: %v, output: %s", err, output)
+		if len(output) > 0 {
+			return nil, fmt.Errorf("error executing transcription script: %v, output: %s", err, output)
+		}
+		return nil, fmt.Errorf("error executing transcription script: %v", err)
 	}
+
 	return output, nil
 }
 
@@ -263,7 +282,8 @@ func validateTranscriptionFile(filename string) error {
 }
 
 func generateSummary(ctx context.Context, text string) (string, string, error) {
-	cmd := exec.CommandContext(ctx, "uv", "run", "/app/scripts/summarize.py", text)
+	cmd := execCommand("uv", "run", "/app/scripts/summarize.py", text)
+	cmd.Env = append(os.Environ(), "PYTHONUNBUFFERED=1")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		logrus.WithFields(logrus.Fields{
@@ -273,7 +293,6 @@ func generateSummary(ctx context.Context, text string) (string, string, error) {
 		return "", "", fmt.Errorf("error executing summarization script: %v, output: %s", err, output)
 	}
 
-	// Extract the final JSON object from the output
 	jsonPart, err := extractFinalJSON(output)
 	if err != nil {
 		return "", "", fmt.Errorf("failed to extract JSON from output: %v", err)

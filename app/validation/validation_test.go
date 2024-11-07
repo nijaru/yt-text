@@ -7,6 +7,49 @@ import (
 	"testing"
 )
 
+func TestValidateURL(t *testing.T) {
+	tests := []struct {
+		name    string
+		url     string
+		wantErr bool
+	}{
+		{
+			name:    "valid http URL",
+			url:     "http://example.com",
+			wantErr: false,
+		},
+		{
+			name:    "valid https URL",
+			url:     "https://example.com",
+			wantErr: false,
+		},
+		{
+			name:    "invalid URL - no scheme",
+			url:     "example.com",
+			wantErr: true,
+		},
+		{
+			name:    "invalid URL - empty",
+			url:     "",
+			wantErr: true,
+		},
+		{
+			name:    "invalid URL - malformed",
+			url:     "http://",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateURL(tt.url)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateURL() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestValidateURL_EdgeCases(t *testing.T) {
 	mockClient := &http.Client{
 		Transport: roundTripperFunc(func(req *http.Request) *http.Response {

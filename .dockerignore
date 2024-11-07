@@ -1,0 +1,55 @@
+# Version control
+.git
+.gitignore
+.gitattributes
+
+# Build artifacts
+**/bin/
+**/obj/
+**/out/
+**/*.exe
+**/*.dll
+**/*.so
+**/*.dylib
+
+# Development and IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Testing
+**/*_test.go
+**/test/
+**/tests/
+coverage.txt
+*.test
+
+# Documentation
+*.md
+LICENSE
+CONTRIBUTING
+
+# Docker
+Dockerfile
+.dockerignore
+docker-compose*.yml
+
+# Temporary files
+*.log
+*.tmp
+.DS_Store
+
+# Python
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.pyd
+.Python
+env/
+venv/
+.env
+*.egg-info/
+dist/
+build/

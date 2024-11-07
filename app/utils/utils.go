@@ -33,10 +33,18 @@ func RespondWithError(w http.ResponseWriter, err error) {
 
 func RespondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Transfer-Encoding", "chunked")
 	w.WriteHeader(code)
-	if err := json.NewEncoder(w).Encode(payload); err != nil {
+
+	encoder := json.NewEncoder(w)
+	if err := encoder.Encode(payload); err != nil {
 		logrus.WithError(err).Error("Failed to encode JSON response")
-		RespondWithError(w, errors.New(http.StatusInternalServerError, "Failed to encode response", err))
+		// Can't send error response at this point since headers already sent
+		return
+	}
+
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
 	}
 }
 

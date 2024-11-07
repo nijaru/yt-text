@@ -2,49 +2,68 @@ import argparse
 import json
 import os
 import random
+import subprocess
+import tempfile
 import time
 
 import whisper
 import yt_dlp
 
 
+def check_dependencies():
+    try:
+        subprocess.run(["ffmpeg", "-version"], capture_output=True, check=True)
+    except (subprocess.SubprocessError, FileNotFoundError):
+        raise RuntimeError("ffmpeg is not installed or not accessible")
+
+
 def download_audio(url) -> str:
+    # Create a temporary directory in /tmp with explicit permissions
+    temp_dir = tempfile.mkdtemp(dir="/tmp")
+    os.chmod(temp_dir, 0o755)
+
     ydl_opts = {
         "format": "bestaudio",
-        "outtmpl": "%(id)s.%(ext)s",
+        "outtmpl": os.path.join(temp_dir, "%(id)s.%(ext)s"),
         "quiet": True,
         "no_warnings": True,
+        "cachedir": False,  # Disable cache
     }
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
             fname = ydl.prepare_filename(info)
-        return fname
+            # Ensure the downloaded file is readable
+            os.chmod(fname, 0o644)
+            return fname
     except yt_dlp.utils.DownloadError as e:
+        if os.path.exists(temp_dir):
+            import shutil
+
+            shutil.rmtree(temp_dir)
         raise RuntimeError(f"Failed to download audio: {e}")
     except Exception as e:
+        if os.path.exists(temp_dir):
+            import shutil
+
+            shutil.rmtree(temp_dir)
         raise RuntimeError(f"An unexpected error occurred: {e}")
 
 
 def transcribe_audio(file, model_name):
     try:
+        # Use environment variable to set cache directory to /tmp
+        os.environ["TRANSFORMERS_CACHE"] = "/tmp"
+        os.environ["HF_HOME"] = "/tmp"
+        os.environ["XDG_CACHE_HOME"] = "/tmp"
+
         model = whisper.load_model(model_name)
         results = model.transcribe(file)
         text = results["text"]
-        os.remove(file)
+        # File will be automatically cleaned up when the temporary directory is removed
         return text
     except Exception as e:
         raise RuntimeError(f"An unexpected error occurred during transcription: {e}")
-
-
-def save_to_file(file, text) -> str:
-    try:
-        filename = f"{os.path.splitext(file)[0]}.txt"
-        with open(filename, "w") as f:
-            f.write(text)
-        return filename
-    except Exception as e:
-        raise RuntimeError(f"Failed to save to file: {e}")
 
 
 def retry_with_backoff(
@@ -79,16 +98,24 @@ def main():
     model_name = args.model
     return_json = args.json
 
-    filename = retry_with_backoff(lambda: download_audio(url))
-    text = retry_with_backoff(lambda: transcribe_audio(filename, model_name))
+    # Use a context manager for the temporary directory
+    with tempfile.TemporaryDirectory(dir="/tmp") as temp_dir:
+        filename = retry_with_backoff(lambda: download_audio(url))
+        text = retry_with_backoff(lambda: transcribe_audio(filename, model_name))
 
-    if return_json:
-        response = {"transcription": text, "model_name": model_name}
-        print(json.dumps(response))
-    else:
-        filename = retry_with_backoff(lambda: save_to_file(filename, text))
-        print(filename)
+        if return_json:
+            response = {"transcription": text, "model_name": model_name}
+            print(json.dumps(response))
+        else:
+            # Save to temp file if needed
+            temp_output = os.path.join(
+                temp_dir, f"{os.path.splitext(os.path.basename(filename))[0]}.txt"
+            )
+            with open(temp_output, "w") as f:
+                f.write(text)
+            print(temp_output)
 
 
 if __name__ == "__main__":
+    check_dependencies()
     main()

@@ -60,6 +60,10 @@ func TranscribeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Use chunked transfer encoding
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Transfer-Encoding", "chunked")
+
 	response := struct {
 		Text      string `json:"text"`
 		ModelName string `json:"model_name"`
@@ -68,7 +72,14 @@ func TranscribeHandler(w http.ResponseWriter, r *http.Request) {
 		ModelName: modelName,
 	}
 
-	utils.RespondWithJSON(w, http.StatusOK, response)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		logger.WithError(err).Error("Failed to encode response")
+		return
+	}
+
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
 }
 
 func validateAndRateLimit(url string) error {

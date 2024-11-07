@@ -17,21 +17,34 @@ type loggingResponseWriter struct {
 	http.ResponseWriter
 	statusCode   int
 	responseSize int64
+	wroteHeader  bool
 }
 
 func NewLoggingResponseWriter(w http.ResponseWriter) *loggingResponseWriter {
-	return &loggingResponseWriter{w, http.StatusOK, 0}
+	return &loggingResponseWriter{w, http.StatusOK, 0, false}
 }
 
 func (lrw *loggingResponseWriter) Write(b []byte) (int, error) {
+	if !lrw.wroteHeader {
+		lrw.WriteHeader(http.StatusOK)
+	}
 	size, err := lrw.ResponseWriter.Write(b)
 	lrw.responseSize += int64(size)
 	return size, err
 }
 
 func (lrw *loggingResponseWriter) WriteHeader(code int) {
-	lrw.statusCode = code
-	lrw.ResponseWriter.WriteHeader(code)
+	if !lrw.wroteHeader {
+		lrw.statusCode = code
+		lrw.ResponseWriter.WriteHeader(code)
+		lrw.wroteHeader = true
+	}
+}
+
+func (lrw *loggingResponseWriter) Flush() {
+	if f, ok := lrw.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
 }
 
 func LoggingMiddleware(next http.Handler) http.Handler {
