@@ -17,63 +17,70 @@
         <header class="bg-gray-800 text-white p-4">
             <div class="container mx-auto">
                 <h1 class="text-3xl font-bold">yt-text</h1>
-                <p class="text-lg">Transcribe YouTube videos easily</p>
+                <p class="text-lg">Transcribe videos easily</p>
             </div>
         </header>
         <main
             class="container mx-auto p-4 flex-grow flex items-center justify-center"
         >
-            <div class="bg-gray-800 shadow-md rounded p-6">
-                <h2 class="text-2xl font-bold mb-4">
-                    Transcribe a YouTube Video
-                </h2>
+            <div class="bg-gray-800 shadow-md rounded p-6 w-full max-w-2xl">
+                <h2 class="text-2xl font-bold mb-4">Transcribe a Video</h2>
                 <form id="transcriptionForm" class="mb-4">
                     <label for="url" class="block text-lg font-medium mb-2"
-                        >Enter URL:</label
+                        >Enter a URL:</label
                     >
                     <input
                         type="url"
                         id="url"
                         name="url"
-                        class="w-full p-2 border border-gray-600 rounded mb-4 bg-gray-700 text-gray-100"
-                        placeholder="https://www.youtube.com/watch?v=example"
+                        class="w-full p-2 border border-gray-600 rounded mb-4 bg-gray-700 text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                        placeholder="https://example.com/video"
                         required
                     />
                     <div class="flex space-x-4">
                         <button
                             type="submit"
-                            class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
+                            class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50 disabled:opacity-50"
                         >
-                            Submit
+                            <span class="flex items-center">
+                                <i class="fas fa-paper-plane mr-2"></i>
+                                Submit
+                            </span>
                         </button>
-                        <!-- Commented out the Summarize button -->
-                        <!--
-                        <button
-                            type="button"
-                            id="summarizeButton"
-                            class="bg-purple-500 text-white px-4 py-2 rounded hover:bg-purple-600"
-                            disabled
-                        >
-                            Summarize
-                        </button>
-                        -->
                     </div>
                 </form>
                 <div id="transcriptionStatus" class="mt-4 text-lg hidden">
                     Transcription in progress...
                 </div>
-                <button
-                    id="copyButton"
-                    class="bg-yellow-500 text-white px-4 py-2 rounded mt-4 hidden hover:bg-yellow-600"
+                <div class="flex space-x-4 mt-4">
+                    <button
+                        id="copyButton"
+                        class="bg-yellow-500 text-white px-4 py-2 rounded hover:bg-yellow-600 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-yellow-500 focus:ring-opacity-50 hidden"
+                    >
+                        <span class="flex items-center">
+                            <i class="fas fa-copy mr-2"></i>
+                            Copy to Clipboard
+                        </span>
+                    </button>
+                    <button
+                        id="downloadButton"
+                        class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-50 hidden"
+                    >
+                        <span class="flex items-center">
+                            <i class="fas fa-download mr-2"></i>
+                            Download as Text File
+                        </span>
+                    </button>
+                </div>
+                <div
+                    id="spinner"
+                    class="mt-4 hidden flex items-center justify-center"
                 >
-                    Copy to Clipboard
-                </button>
-                <button
-                    id="downloadButton"
-                    class="bg-green-500 text-white px-4 py-2 rounded mt-4 hidden hover:bg-green-600"
-                >
-                    Download as Text File
-                </button>
+                    <div
+                        class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"
+                    ></div>
+                    <span class="ml-3">Processing...</span>
+                </div>
                 <h3
                     id="transcriptionHeader"
                     class="text-xl font-bold mt-4 hidden"
@@ -81,28 +88,6 @@
                     Transcription:
                 </h3>
                 <div id="response" class="mt-4 text-lg"></div>
-                <div id="spinner" class="mt-4 hidden">
-                    <svg
-                        class="animate-spin h-5 w-5 text-blue-500"
-                        xmlns="http://www.w3.org/2000/svg"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                    >
-                        <circle
-                            class="opacity-25"
-                            cx="12"
-                            cy="12"
-                            r="10"
-                            stroke="currentColor"
-                            stroke-width="4"
-                        ></circle>
-                        <path
-                            class="opacity-75"
-                            fill="currentColor"
-                            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                        ></path>
-                    </svg>
-                </div>
             </div>
         </main>
         <footer class="bg-gray-800 text-white p-4 mt-8">

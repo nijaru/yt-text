@@ -2,6 +2,52 @@ import { validateURL } from "./utils.js";
 
 let controller;
 
+function showError(message) {
+	const responseDiv = document.getElementById("response");
+	responseDiv.innerHTML = `
+        <div class="bg-red-500 text-white p-4 rounded-md">
+            <p class="font-bold">Error</p>
+            <p>${message}</p>
+        </div>
+    `;
+}
+
+function showSuccess(text) {
+	const responseDiv = document.getElementById("response");
+	responseDiv.innerHTML = `
+        <div class="bg-gray-700 p-4 rounded-md">
+            <pre class="whitespace-pre-wrap">${text}</pre>
+        </div>
+    `;
+}
+
+function showToast(message, type = "success") {
+	const toast = document.createElement("div");
+	toast.className = `fixed bottom-4 right-4 ${
+		type === "success" ? "bg-green-500" : "bg-red-500"
+	} text-white px-6 py-3 rounded-lg shadow-lg transform transition-all duration-500 translate-y-0`;
+	toast.textContent = message;
+	document.body.appendChild(toast);
+
+	setTimeout(() => {
+		toast.classList.add("translate-y-full", "opacity-0");
+		setTimeout(() => toast.remove(), 500);
+	}, 3000);
+}
+
+function validateAndShowFeedback(url) {
+	const input = document.getElementById("url");
+	if (!validateURL(url)) {
+		input.classList.add("border-red-500");
+		input.classList.add("focus:ring-red-500");
+		showError("Please enter a valid URL");
+		return false;
+	}
+	input.classList.remove("border-red-500");
+	input.classList.remove("focus:ring-red-500");
+	return true;
+}
+
 document
 	.getElementById("transcriptionForm")
 	.addEventListener("submit", async (event) => {
@@ -10,28 +56,25 @@ document
 		const spinner = document.getElementById("spinner");
 		const transcriptionStatus = document.getElementById("transcriptionStatus");
 		const transcriptionHeader = document.getElementById("transcriptionHeader");
-		document.getElementById("response").innerText = ""; // Clear response
-		document.getElementById("copyButton").classList.add("hidden"); // Hide copy button
-		document.getElementById("downloadButton").classList.add("hidden"); // Hide download button
-		transcriptionHeader.classList.add("hidden"); // Hide transcription header
-		spinner.classList.remove("hidden"); // Show spinner
-		transcriptionStatus.classList.remove("hidden"); // Show transcription status
-
-		submitButton.disabled = true; // Disable the button after sending the request
-
 		const url = document.getElementById("url").value;
 
-		// Validate URL format
-		if (!validateURL(url)) {
-			document.getElementById("response").innerText =
-				"Invalid URL format. Please enter a valid URL.";
-			spinner.classList.add("hidden"); // Hide spinner
-			transcriptionStatus.classList.add("hidden"); // Hide transcription status
-			submitButton.disabled = false; // Re-enable the button
+		// Reset UI
+		document.getElementById("response").innerText = "";
+		document.getElementById("copyButton").classList.add("hidden");
+		document.getElementById("downloadButton").classList.add("hidden");
+		transcriptionHeader.classList.add("hidden");
+
+		// Validate URL
+		if (!validateAndShowFeedback(url)) {
 			return;
 		}
 
-		// Create a new AbortController instance
+		// Show loading state
+		spinner.classList.remove("hidden");
+		transcriptionStatus.classList.remove("hidden");
+		submitButton.disabled = true;
+
+		// Create new AbortController
 		controller = new AbortController();
 		const signal = controller.signal;
 
@@ -41,119 +84,67 @@ document
 				headers: {
 					"Content-Type": "application/x-www-form-urlencoded",
 				},
-				body: new URLSearchParams({
-					url: url,
-				}),
-				signal: signal, // Pass the signal to the fetch request
+				body: new URLSearchParams({ url }),
+				signal,
 			});
 
 			if (!response.ok) {
-				const text = await response.text();
-				if (response.status === 400) {
-					document.getElementById("response").innerText =
-						"Invalid URL. Please enter a valid URL.";
-				} else if (response.status === 429) {
-					document.getElementById("response").innerText =
-						"Too many requests. Please try again later.";
-				} else {
-					document.getElementById("response").innerText =
-						"An error occurred while processing your request. Please try again later.";
-				}
-				return; // Do not throw an error to prevent logging to the console
+				const errorMessages = {
+					400: "Invalid YouTube URL. Please check and try again.",
+					429: "Too many requests. Please wait a moment and try again.",
+					500: "Server error. Please try again later.",
+				};
+				showError(
+					errorMessages[response.status] || "An unexpected error occurred.",
+				);
+				return;
 			}
 
 			const data = await response.json();
-			const responseDiv = document.getElementById("response");
-			responseDiv.innerText = data.text;
+			showSuccess(data.text);
 
+			// Show copy button
 			const copyButton = document.getElementById("copyButton");
-			copyButton.classList.remove("hidden"); // Show copy button
+			copyButton.classList.remove("hidden");
 			copyButton.onclick = () => {
 				navigator.clipboard
 					.writeText(data.text)
 					.then(() => {
-						alert("Text copied to clipboard");
+						showToast("Text copied to clipboard");
 					})
 					.catch(() => {
-						document.getElementById("response").innerText =
-							"Failed to copy text. Please try again.";
+						showToast("Failed to copy text", "error");
 					});
 			};
 
+			// Show download button
 			const downloadButton = document.getElementById("downloadButton");
-			downloadButton.classList.remove("hidden"); // Show download button
+			downloadButton.classList.remove("hidden");
 			downloadButton.onclick = () => {
-				const blob = new Blob([data.text], {
-					type: "text/plain",
-				});
+				const blob = new Blob([data.text], { type: "text/plain" });
 				const link = document.createElement("a");
 				link.href = URL.createObjectURL(blob);
 				link.download = `${url.replace(/[^a-z0-9]/gi, "_").toLowerCase()}.txt`;
 				link.click();
+				showToast("Download started");
 			};
 
-			transcriptionHeader.classList.remove("hidden"); // Show transcription header
+			transcriptionHeader.classList.remove("hidden");
 		} catch (error) {
-			// Handle the error gracefully without logging to the console
-		} finally {
-			submitButton.disabled = false; // Re-enable the button
-			spinner.classList.add("hidden"); // Hide spinner
-			transcriptionStatus.classList.add("hidden"); // Hide transcription status
-		}
-	});
-
-// Remove the event listener for the summarize button
-/*
-document
-	.getElementById("summarizeButton")
-	.addEventListener("click", async () => {
-		const url = document.getElementById("url").value;
-
-		// Validate URL format
-		if (!validateURL(url)) {
-			document.getElementById("response").innerText =
-				"Invalid URL format. Please enter a valid URL.";
-			return;
-		}
-
-		try {
-			const response = await fetch("/summarize", {
-				method: "POST",
-				headers: {
-					"Content-Type": "application/x-www-form-urlencoded",
-				},
-				body: new URLSearchParams({
-					url: url,
-				}),
-			});
-
-			if (!response.ok) {
-				const text = await response.text();
-				if (response.status === 400) {
-					document.getElementById("response").innerText =
-						"Invalid URL. Please enter a valid URL.";
-				} else if (response.status === 429) {
-					document.getElementById("response").innerText =
-						"Too many requests. Please try again later.";
-				} else {
-					document.getElementById("response").innerText =
-						"An error occurred while processing your request. Please try again later.";
-				}
-				return; // Do not throw an error to prevent logging to the console
+			if (error.name === "AbortError") {
+				showError("Request was cancelled.");
+			} else {
+				showError("Network error. Please check your connection and try again.");
 			}
-
-			const data = await response.json();
-			document.getElementById("response").innerText = data.text;
-		} catch (error) {
-			// Handle the error gracefully without logging to the console
-			document.getElementById("response").innerText =
-				"An error occurred while processing your request. Please try again later.";
+		} finally {
+			submitButton.disabled = false;
+			spinner.classList.add("hidden");
+			transcriptionStatus.classList.add("hidden");
 		}
 	});
-*/
 
 window.addEventListener("beforeunload", () => {
 	if (controller) {
-		controller.abort(); // Abort the fetch request if the user leaves the page
+		controller.abort();
 	}
 });
