@@ -17,73 +17,75 @@
         <header class="bg-gray-800 text-white p-4">
             <div class="container mx-auto">
                 <h1 class="text-3xl font-bold">yt-text</h1>
-                <p class="text-lg">Transcribe YouTube videos easily</p>
+                <p class="text-lg">Transcribe videos easily</p>
             </div>
         </header>
-        <main
-            class="container mx-auto p-4 flex-grow flex items-center justify-center"
-        >
-            <div class="bg-gray-800 shadow-md rounded p-6">
-                <h2 class="text-2xl font-bold mb-4">
+        <main class="container mx-auto p-8 flex-grow">
+            <div class="bg-gray-800 shadow-md rounded p-8 max-w-4xl mx-auto">
+                <h2 class="text-2xl font-bold mb-6">
                     Transcribe a YouTube Video
                 </h2>
-                <form id="transcriptionForm" class="mb-4">
-                    <label for="url" class="block text-lg font-medium mb-2"
+                <form id="transcriptionForm" class="mb-6">
+                    <label for="url" class="block text-lg font-medium mb-3"
                         >Enter URL:</label
                     >
                     <input
                         type="url"
                         id="url"
                         name="url"
-                        class="w-full p-2 border border-gray-600 rounded mb-4 bg-gray-700 text-gray-100"
+                        class="w-full p-4 text-lg border border-gray-600 rounded mb-6 bg-gray-700 text-gray-100"
                         placeholder="https://www.youtube.com/watch?v=example"
                         required
                     />
+                    <div
+                        id="g-recaptcha"
+                        class="g-recaptcha mb-6"
+                        data-sitekey="6Lf-pHcqAAAAAAveMDTB_-TB0kT9MuIvQJ6qesoH"
+                        data-callback="enableSubmit"
+                        data-expired-callback="disableSubmit"
+                        data-error-callback="disableSubmit"
+                        data-size="invisible"
+                        data-theme="dark"
+                    ></div>
                     <div class="flex space-x-4">
                         <button
                             type="submit"
-                            class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
+                            class="bg-blue-500 text-white px-6 py-3 rounded hover:bg-blue-600 text-lg"
                         >
                             Submit
                         </button>
-                        <!-- Commented out the Summarize button -->
-                        <!--
-                        <button
-                            type="button"
-                            id="summarizeButton"
-                            class="bg-purple-500 text-white px-4 py-2 rounded hover:bg-purple-600"
-                            disabled
-                        >
-                            Summarize
-                        </button>
-                        -->
                     </div>
                 </form>
-                <div id="transcriptionStatus" class="mt-4 text-lg hidden">
+                <div id="transcriptionStatus" class="mt-6 text-lg hidden">
                     Transcription in progress...
                 </div>
-                <button
-                    id="copyButton"
-                    class="bg-yellow-500 text-white px-4 py-2 rounded mt-4 hidden hover:bg-yellow-600"
-                >
-                    Copy to Clipboard
-                </button>
-                <button
-                    id="downloadButton"
-                    class="bg-green-500 text-white px-4 py-2 rounded mt-4 hidden hover:bg-green-600"
-                >
-                    Download as Text File
-                </button>
+                <div class="flex space-x-4 mt-6">
+                    <button
+                        id="copyButton"
+                        class="bg-yellow-500 text-white px-6 py-3 rounded hidden hover:bg-yellow-600 text-lg"
+                    >
+                        Copy to Clipboard
+                    </button>
+                    <button
+                        id="downloadButton"
+                        class="bg-green-500 text-white px-6 py-3 rounded hidden hover:bg-green-600 text-lg"
+                    >
+                        Download as Text File
+                    </button>
+                </div>
                 <h3
                     id="transcriptionHeader"
-                    class="text-xl font-bold mt-4 hidden"
+                    class="text-xl font-bold mt-6 hidden"
                 >
                     Transcription:
                 </h3>
-                <div id="response" class="mt-4 text-lg"></div>
-                <div id="spinner" class="mt-4 hidden">
+                <div
+                    id="response"
+                    class="mt-6 text-lg p-6 bg-gray-700 rounded min-h-[300px] whitespace-pre-wrap"
+                ></div>
+                <div id="spinner" class="mt-6 hidden">
                     <svg
-                        class="animate-spin h-5 w-5 text-blue-500"
+                        class="animate-spin h-8 w-8 text-blue-500"
                         xmlns="http://www.w3.org/2000/svg"
                         fill="none"
                         viewBox="0 0 24 24"

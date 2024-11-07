@@ -2,155 +2,160 @@ import { validateURL } from "./utils.js";
 
 let controller;
 
+const RECAPTCHA_SITE_KEY = "6Lf-pHcqAAAAAAveMDTB_-TB0kT9MuIvQJ6qesoH";
+
+function initRecaptcha() {
+	const script = document.createElement("script");
+	script.src = `https://www.google.com/recaptcha/api.js?onload=onRecaptchaLoad&render=${RECAPTCHA_SITE_KEY}`;
+	script.async = true;
+	script.defer = true;
+	document.head.appendChild(script);
+}
+
+window.onRecaptchaLoad = () => {
+	// Enable submit button immediately for local testing
+	const submitButton = document.querySelector('button[type="submit"]');
+	submitButton.disabled = false;
+
+	grecaptcha.ready(() => {
+		// The reCAPTCHA is ready
+		submitButton.disabled = false;
+	});
+};
+
+document.addEventListener("DOMContentLoaded", () => {
+	initRecaptcha();
+	// Enable submit button for local testing
+	const submitButton = document.querySelector('button[type="submit"]');
+	submitButton.disabled = false;
+});
+
+window.enableSubmit = () => {
+	const submitButton = document.querySelector('button[type="submit"]');
+	submitButton.disabled = false;
+};
+
+window.disableSubmit = () => {
+	const submitButton = document.querySelector('button[type="submit"]');
+	submitButton.disabled = true;
+};
+
 document
 	.getElementById("transcriptionForm")
 	.addEventListener("submit", async (event) => {
 		event.preventDefault();
+
 		const submitButton = document.querySelector('button[type="submit"]');
-		const spinner = document.getElementById("spinner");
-		const transcriptionStatus = document.getElementById("transcriptionStatus");
-		const transcriptionHeader = document.getElementById("transcriptionHeader");
-		document.getElementById("response").innerText = ""; // Clear response
-		document.getElementById("copyButton").classList.add("hidden"); // Hide copy button
-		document.getElementById("downloadButton").classList.add("hidden"); // Hide download button
-		transcriptionHeader.classList.add("hidden"); // Hide transcription header
-		spinner.classList.remove("hidden"); // Show spinner
-		transcriptionStatus.classList.remove("hidden"); // Show transcription status
-
-		submitButton.disabled = true; // Disable the button after sending the request
-
 		const url = document.getElementById("url").value;
 
-		// Validate URL format
+		// Validate URL first
 		if (!validateURL(url)) {
 			document.getElementById("response").innerText =
 				"Invalid URL format. Please enter a valid URL.";
-			spinner.classList.add("hidden"); // Hide spinner
-			transcriptionStatus.classList.add("hidden"); // Hide transcription status
-			submitButton.disabled = false; // Re-enable the button
 			return;
 		}
 
-		// Create a new AbortController instance
-		controller = new AbortController();
-		const signal = controller.signal;
-
 		try {
-			const response = await fetch("/transcribe", {
-				method: "POST",
-				headers: {
-					"Content-Type": "application/x-www-form-urlencoded",
-				},
-				body: new URLSearchParams({
-					url: url,
-				}),
-				signal: signal, // Pass the signal to the fetch request
+			// Execute reCAPTCHA verification
+			const token = await grecaptcha.execute(RECAPTCHA_SITE_KEY, {
+				action: "submit",
 			});
-
-			if (!response.ok) {
-				const text = await response.text();
-				if (response.status === 400) {
-					document.getElementById("response").innerText =
-						"Invalid URL. Please enter a valid URL.";
-				} else if (response.status === 429) {
-					document.getElementById("response").innerText =
-						"Too many requests. Please try again later.";
-				} else {
-					document.getElementById("response").innerText =
-						"An error occurred while processing your request. Please try again later.";
-				}
-				return; // Do not throw an error to prevent logging to the console
+			if (!token) {
+				throw new Error("reCAPTCHA verification failed");
 			}
 
-			const data = await response.json();
+			const formData = new URLSearchParams({
+				url: url,
+				"g-recaptcha-response": token,
+			});
+
+			const spinner = document.getElementById("spinner");
+			const transcriptionStatus = document.getElementById(
+				"transcriptionStatus",
+			);
+			const transcriptionHeader = document.getElementById(
+				"transcriptionHeader",
+			);
 			const responseDiv = document.getElementById("response");
-			responseDiv.innerText = data.text;
 
-			const copyButton = document.getElementById("copyButton");
-			copyButton.classList.remove("hidden"); // Show copy button
-			copyButton.onclick = () => {
-				navigator.clipboard
-					.writeText(data.text)
-					.then(() => {
-						alert("Text copied to clipboard");
-					})
-					.catch(() => {
-						document.getElementById("response").innerText =
-							"Failed to copy text. Please try again.";
-					});
-			};
+			// Reset UI state
+			responseDiv.innerText = "";
+			document.getElementById("copyButton").classList.add("hidden");
+			document.getElementById("downloadButton").classList.add("hidden");
+			transcriptionHeader.classList.add("hidden");
+			spinner.classList.remove("hidden");
+			transcriptionStatus.classList.remove("hidden");
+			submitButton.disabled = true;
 
-			const downloadButton = document.getElementById("downloadButton");
-			downloadButton.classList.remove("hidden"); // Show download button
-			downloadButton.onclick = () => {
-				const blob = new Blob([data.text], {
-					type: "text/plain",
+			// Create a new AbortController instance
+			controller = new AbortController();
+			const signal = controller.signal;
+
+			try {
+				const response = await fetch("/transcribe", {
+					method: "POST",
+					headers: {
+						"Content-Type": "application/x-www-form-urlencoded",
+					},
+					body: formData,
+					signal: signal,
 				});
-				const link = document.createElement("a");
-				link.href = URL.createObjectURL(blob);
-				link.download = `${url.replace(/[^a-z0-9]/gi, "_").toLowerCase()}.txt`;
-				link.click();
-			};
 
-			transcriptionHeader.classList.remove("hidden"); // Show transcription header
-		} catch (error) {
-			// Handle the error gracefully without logging to the console
-		} finally {
-			submitButton.disabled = false; // Re-enable the button
-			spinner.classList.add("hidden"); // Hide spinner
-			transcriptionStatus.classList.add("hidden"); // Hide transcription status
-		}
-	});
+				if (!response.ok) {
+					const errorMessages = {
+						400: "Invalid URL. Please enter a valid URL.",
+						429: "Too many requests. Please try again later.",
+						default:
+							"An error occurred while processing your request. Please try again later.",
+					};
+					responseDiv.innerText =
+						errorMessages[response.status] || errorMessages.default;
+					return;
+				}
 
-// Remove the event listener for the summarize button
-/*
-document
-	.getElementById("summarizeButton")
-	.addEventListener("click", async () => {
-		const url = document.getElementById("url").value;
+				const data = await response.json();
+				responseDiv.innerText = data.text;
 
-		// Validate URL format
-		if (!validateURL(url)) {
-			document.getElementById("response").innerText =
-				"Invalid URL format. Please enter a valid URL.";
-			return;
-		}
+				// Setup copy button
+				const copyButton = document.getElementById("copyButton");
+				copyButton.classList.remove("hidden");
+				copyButton.onclick = async () => {
+					try {
+						await navigator.clipboard.writeText(data.text);
+						alert("Text copied to clipboard");
+					} catch (err) {
+						responseDiv.innerText = "Failed to copy text. Please try again.";
+					}
+				};
 
-		try {
-			const response = await fetch("/summarize", {
-				method: "POST",
-				headers: {
-					"Content-Type": "application/x-www-form-urlencoded",
-				},
-				body: new URLSearchParams({
-					url: url,
-				}),
-			});
+				// Setup download button
+				const downloadButton = document.getElementById("downloadButton");
+				downloadButton.classList.remove("hidden");
+				downloadButton.onclick = () => {
+					const blob = new Blob([data.text], { type: "text/plain" });
+					const link = document.createElement("a");
+					link.href = URL.createObjectURL(blob);
+					link.download = `${url.replace(/[^a-z0-9]/gi, "_").toLowerCase()}.txt`;
+					link.click();
+					URL.revokeObjectURL(link.href);
+				};
 
-			if (!response.ok) {
-				const text = await response.text();
-				if (response.status === 400) {
-					document.getElementById("response").innerText =
-						"Invalid URL. Please enter a valid URL.";
-				} else if (response.status === 429) {
-					document.getElementById("response").innerText =
-						"Too many requests. Please try again later.";
-				} else {
-					document.getElementById("response").innerText =
+				transcriptionHeader.classList.remove("hidden");
+			} catch (error) {
+				if (error.name !== "AbortError") {
+					responseDiv.innerText =
 						"An error occurred while processing your request. Please try again later.";
 				}
-				return; // Do not throw an error to prevent logging to the console
+			} finally {
+				submitButton.disabled = false;
+				spinner.classList.add("hidden");
+				transcriptionStatus.classList.add("hidden");
 			}
-
-			const data = await response.json();
-			document.getElementById("response").innerText = data.text;
 		} catch (error) {
-			// Handle the error gracefully without logging to the console
 			document.getElementById("response").innerText =
-				"An error occurred while processing your request. Please try again later.";
+				"Please verify that you are human";
 		}
 	});
-*/
 
 window.addEventListener("beforeunload", () => {
 	if (controller) {
