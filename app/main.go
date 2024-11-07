@@ -21,7 +21,7 @@ import (
 
 func init() {
 	// Ensure the log directory exists
-	logDir := config.GetEnv("LOG_DIR", "./logs")
+	logDir := config.GetEnv("LOG_DIR", "/app/logs")
 	if err := os.MkdirAll(logDir, os.ModePerm); err != nil {
 		logrus.Fatalf("Failed to create log directory: %v", err)
 	}
@@ -113,10 +113,10 @@ func serveIndex(w http.ResponseWriter, r *http.Request) {
 		"method": r.Method,
 		"path":   r.URL.Path,
 	}).Info("Serving index.html")
-	http.ServeFile(w, r, "./static/index.html")
+	http.ServeFile(w, r, "/app/static/index.html")
 }
 
 func serveStaticFiles(w http.ResponseWriter, r *http.Request) {
-	filePath := "." + r.URL.Path
+	filePath := "/app" + r.URL.Path
 	http.ServeFile(w, r, filePath)
 }

@@ -203,7 +203,7 @@ func executeTranscriptionWithRetry(ctx context.Context, url string) ([]byte, err
 }
 
 func executeTranscriptionScript(ctx context.Context, url string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, "uv", "run", "transcribe.py", url, "--json")
+	cmd := exec.CommandContext(ctx, "uv", "run", "/app/scripts/transcribe.py", url, "--json")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("error executing transcription script: %v, output: %s", err, output)
@@ -252,7 +252,7 @@ func validateTranscriptionFile(filename string) error {
 }
 
 func generateSummary(ctx context.Context, text string) (string, string, error) {
-	cmd := exec.CommandContext(ctx, "python3", "summarize.py", text)
+	cmd := exec.CommandContext(ctx, "uv", "run", "/app/scripts/summarize.py", text)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		logrus.WithFields(logrus.Fields{
