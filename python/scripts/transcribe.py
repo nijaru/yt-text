@@ -17,6 +17,30 @@ def check_dependencies():
         raise RuntimeError("ffmpeg is not installed or not accessible")
 
 
+def check_video_length(url) -> float:
+    ydl_opts = {
+        "quiet": True,
+        "no_warnings": True,
+    }
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(url, download=False)
+        duration = info.get("duration", 0)  # Duration in seconds
+        return duration
+
+
+def check_file_size(url) -> int:
+    ydl_opts = {
+        "quiet": True,
+        "no_warnings": True,
+    }
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(url, download=False)
+        filesize = info.get("filesize", 0)
+        if filesize == 0:
+            filesize = info.get("filesize_approx", 0)
+        return filesize
+
+
 def download_audio(url) -> str:
     # Create a temporary directory in /tmp with explicit permissions
     temp_dir = tempfile.mkdtemp(dir="/tmp")
@@ -97,6 +121,17 @@ def main():
     url = args.url
     model_name = args.model
     return_json = args.json
+
+    # Check video length (1 hour = 3600 seconds)
+    duration = check_video_length(url)
+    if duration > 3600:
+        raise ValueError("Video is longer than 1 hour")
+
+    # Check file size (100MB limit)
+    MAX_SIZE = 100 * 1024 * 1024  # 100MB in bytes
+    size = check_file_size(url)
+    if size > MAX_SIZE:
+        raise ValueError("File size too large")
 
     # Use a context manager for the temporary directory
     with tempfile.TemporaryDirectory(dir="/tmp") as temp_dir:

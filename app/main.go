@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sync"
 	"syscall"
 	"time"
 
@@ -14,10 +15,75 @@ import (
 	"github.com/nijaru/yt-text/db"
 	"github.com/nijaru/yt-text/handlers"
 	"github.com/nijaru/yt-text/middleware"
-
 	"github.com/sirupsen/logrus"
+	"golang.org/x/time/rate"
 	"gopkg.in/natefinch/lumberjack.v2"
 )
+
+// IPRateLimiter handles per-IP rate limiting
+type IPRateLimiter struct {
+	ips map[string]*rate.Limiter
+	mu  sync.RWMutex
+	r   rate.Limit
+	b   int
+}
+
+func NewIPRateLimiter(r rate.Limit, b int) *IPRateLimiter {
+	return &IPRateLimiter{
+		ips: make(map[string]*rate.Limiter),
+		r:   r,
+		b:   b,
+	}
+}
+
+func (i *IPRateLimiter) GetLimiter(ip string) *rate.Limiter {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+
+	limiter, exists := i.ips[ip]
+	if !exists {
+		limiter = rate.NewLimiter(i.r, i.b)
+		i.ips[ip] = limiter
+	}
+
+	return limiter
+}
+
+// Middleware functions
+func ipRateLimitMiddleware(limiter *IPRateLimiter) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ip := r.RemoteAddr
+			if limiter.GetLimiter(ip).Allow() {
+				next.ServeHTTP(w, r)
+			} else {
+				http.Error(w, "Rate limit exceeded", http.StatusTooManyRequests)
+			}
+		})
+	}
+}
+
+func maxBytesMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.Body = http.MaxBytesReader(w, r.Body, 1024*1024) // 1MB limit
+		next.ServeHTTP(w, r)
+	})
+}
+
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*") // Replace with your domain in production
+		w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
 
 func init() {
 	// Ensure the log directory exists
@@ -45,9 +111,8 @@ func init() {
 }
 
 func main() {
+	// Load and validate configuration
 	cfg := config.LoadConfig()
-
-	// Validate configuration
 	if err := config.ValidateConfig(cfg); err != nil {
 		logrus.WithError(err).Fatal("Invalid configuration")
 	}
@@ -65,48 +130,56 @@ func main() {
 	// Initialize handlers
 	handlers.InitHandlers(cfg)
 
+	// Create IP rate limiter (5 requests per hour per IP)
+	ipLimiter := NewIPRateLimiter(rate.Every(1*time.Hour), 5)
+
+	// Set up routes
 	mux := http.NewServeMux()
 	mux.HandleFunc("/static/", serveStaticFiles)
 	mux.HandleFunc("/", serveIndex)
 	mux.HandleFunc("/transcribe", handlers.TranscribeHandler)
-	// disable since it uses ~2.25GB RAM on test video
-	// mux.HandleFunc("/summarize", handlers.SummarizeHandler)
 
-	loggedMux := middleware.LoggingMiddleware(mux)
+	// Chain middleware in the correct order
+	handler := corsMiddleware(
+		ipRateLimitMiddleware(ipLimiter)(
+			maxBytesMiddleware(
+				middleware.LoggingMiddleware(mux),
+			),
+		),
+	)
 
+	// Configure server
 	server := &http.Server{
 		Addr:         ":" + cfg.ServerPort,
-		Handler:      loggedMux,
+		Handler:      handler,
 		ReadTimeout:  cfg.ReadTimeout,
 		WriteTimeout: cfg.WriteTimeout,
 		IdleTimeout:  cfg.IdleTimeout,
 	}
 
+	// Start server
 	go func() {
-		logrus.WithField("port", cfg.ServerPort).Info("Listening on port")
+		logrus.WithField("port", cfg.ServerPort).Info("Starting server")
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logrus.WithError(err).Fatal("Could not listen on port")
+			logrus.WithError(err).Fatal("Server failed to start")
 		}
 	}()
 
-	// Graceful shutdown
+	// Set up graceful shutdown
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 
 	<-stop
+	logrus.Info("Shutting down server...")
 
-	logrus.Info("Shutting down the server...")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	if err := server.Shutdown(ctx); err != nil {
-		logrus.WithError(err).Fatal("Server Shutdown")
+		logrus.WithError(err).Fatal("Server shutdown failed")
 	}
 
-	// Close database connection
-	if err := db.DB.Close(); err != nil {
-		logrus.WithError(err).Error("Failed to close database")
-	}
+	logrus.Info("Server stopped gracefully")
 }
 
 func serveIndex(w http.ResponseWriter, r *http.Request) {

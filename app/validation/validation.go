@@ -60,3 +60,36 @@ func ValidateURL(rawURL string) error {
 
 	return nil
 }
+
+var (
+	allowedDomains = []string{"youtube.com", "youtu.be"}
+	blockedDomains = []string{"example.com", "malicious.com"}
+)
+
+func validateDomain(urlStr string) error {
+	parsedURL, err := url.Parse(urlStr)
+	if err != nil {
+		return errors.ErrInvalidURL(err)
+	}
+
+	// Check if domain is blocked
+	for _, blocked := range blockedDomains {
+		if strings.Contains(parsedURL.Host, blocked) {
+			return errors.ErrInvalidRequest("Domain not allowed")
+		}
+	}
+
+	// Check if domain is allowed
+	allowed := false
+	for _, domain := range allowedDomains {
+		if strings.Contains(parsedURL.Host, domain) {
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
+		return errors.ErrInvalidRequest("Domain not supported")
+	}
+
+	return nil
+}
