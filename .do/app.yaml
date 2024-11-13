@@ -7,7 +7,7 @@ services:
       branch: main
       deploy_on_push: true
       repo: nijaru/yt-text
-    instance_size_slug: basic-s
+    instance_size_slug: basic-m
     instance_count: 1
     http_port: 8080
     envs:
