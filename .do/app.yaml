@@ -1,30 +1,15 @@
-# .do/app.yaml
 name: yt-text
 services:
   - name: yt-text
-    dockerfile_command: docker-compose -f docker-compose.yml -f docker-compose.prod.yml up
+    dockerfile_path: Dockerfile
+    source_dir: /
     github:
       branch: main
       deploy_on_push: true
       repo: nijaru/yt-text
-    source_dir: /
     instance_size_slug: basic-s
     instance_count: 1
     http_port: 8080
     envs:
-      - key: SPACES_ENABLED
-        value: "true"
-      - key: SPACES_REGION
-        value: "nyc3"
-      - key: SPACES_ENDPOINT
-        value: "https://nyc3.digitaloceanspaces.com"
-      - key: SPACES_BUCKET
-        value: "yt-text"
-      - key: SPACES_KEY
-        scope: RUN_TIME
-        type: SECRET
-        value: ${SPACES_KEY}
-      - key: SPACES_SECRET
-        scope: RUN_TIME
-        type: SECRET
-        value: ${SPACES_SECRET}
+      - key: DOCKER_COMPOSE_FILE
+        value: docker-compose.prod.yml
