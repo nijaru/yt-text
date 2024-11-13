@@ -1,4 +1,4 @@
-# docker-compose.yml (development)
+# docker-compose.prod.yml
 services:
   app:
     build:
@@ -15,12 +15,12 @@ services:
       - WRITE_TIMEOUT=300s
       - IDLE_TIMEOUT=120s
       - TRANSCRIBE_TIMEOUT=30m
-      - RATE_LIMIT=2
-      - RATE_LIMIT_INTERVAL=5s
+      - RATE_LIMIT=1
+      - RATE_LIMIT_INTERVAL=10s
 
       # Model Configuration
-      - MODEL_NAME=base.en
-      - SUMMARY_MODEL_NAME=facebook/bart-large-cnn
+      - MODEL_NAME=tiny.en
+      - SUMMARY_MODEL_NAME=facebook/bart-base
 
       # Python Environment
       - PYTHONDONTWRITEBYTECODE=1
@@ -34,7 +34,7 @@ services:
       - PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:32
       - MALLOC_ARENA_MAX=2
       - GOMAXPROCS=1
-      - GOGC=50
+      - GOGC=20
 
       # Spaces Configuration
       - SPACES_ENABLED=true
@@ -52,11 +52,11 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "4.0"
-          memory: 8G
-        reservations:
           cpus: "1.0"
-          memory: 2G
+          memory: 1.8G
+        reservations:
+          cpus: "0.25"
+          memory: 512M
     logging:
       driver: "json-file"
       options:

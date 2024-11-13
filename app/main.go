@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime/debug"
 	"sync"
 	"syscall"
 	"time"
@@ -108,6 +109,9 @@ func init() {
 	logrus.SetOutput(multiWriter)
 	logrus.SetFormatter(&logrus.JSONFormatter{})
 	logrus.SetLevel(logrus.InfoLevel)
+
+	debug.SetGCPercent(50)                         // More aggressive garbage collection
+	debug.SetMemoryLimit(1.5 * 1024 * 1024 * 1024) // 1.5GB memory limit
 }
 
 func main() {

@@ -21,20 +21,37 @@ type Config struct {
 	RateLimitInterval time.Duration
 	ModelName         string
 	SummaryModelName  string
+
+	// Spaces Configuration
+	SpacesEnabled  bool
+	SpacesKey      string
+	SpacesSecret   string
+	SpacesRegion   string
+	SpacesEndpoint string
+	SpacesBucket   string
 }
 
 func LoadConfig() *Config {
 	return &Config{
-		DBPath:            GetEnv("DB_PATH", "./data/urls.db"),
+		DBPath:            GetEnv("DB_PATH", "/tmp/urls.db"),
 		ServerPort:        GetEnv("SERVER_PORT", "8080"),
-		ReadTimeout:       getEnvAsDuration("READ_TIMEOUT", 30*time.Second),
-		WriteTimeout:      getEnvAsDuration("WRITE_TIMEOUT", 60*time.Second),
-		IdleTimeout:       getEnvAsDuration("IDLE_TIMEOUT", 60*time.Second),
-		TranscribeTimeout: getEnvAsDuration("TRANSCRIBE_TIMEOUT", 10*time.Minute),
+		ReadTimeout:       getEnvAsDuration("READ_TIMEOUT", 120*time.Second),
+		WriteTimeout:      getEnvAsDuration("WRITE_TIMEOUT", 300*time.Second),
+		IdleTimeout:       getEnvAsDuration("IDLE_TIMEOUT", 120*time.Second),
+		TranscribeTimeout: getEnvAsDuration("TRANSCRIBE_TIMEOUT", 30*time.Minute),
 		RateLimit:         getEnvAsInt("RATE_LIMIT", 5),
-		RateLimitInterval: getEnvAsDuration("RATE_LIMIT_INTERVAL", 1*time.Second),
+		RateLimitInterval: getEnvAsDuration("RATE_LIMIT_INTERVAL", 5*time.Second),
 		ModelName:         GetEnv("MODEL_NAME", "base.en"),
 		SummaryModelName:  GetEnv("SUMMARY_MODEL_NAME", "facebook/bart-large-cnn"),
+
+		// Spaces Configuration
+		SpacesEnabled:  getEnvAsBool("SPACES_ENABLED", false),
+        SpacesKey:     GetEnv("SPACES_KEY", ""),
+        SpacesSecret:  GetEnv("SPACES_SECRET", ""),
+        SpacesRegion:  GetEnv("SPACES_REGION", "nyc3"),
+        SpacesEndpoint: GetEnv("SPACES_ENDPOINT", "https://nyc3.digitaloceanspaces.com"),
+        SpacesBucket:  GetEnv("SPACES_BUCKET", "yt-text"),
+    }
 	}
 }
 

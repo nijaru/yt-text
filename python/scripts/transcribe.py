@@ -80,6 +80,7 @@ def transcribe_audio(file, model_name):
         os.environ["TRANSFORMERS_CACHE"] = "/tmp"
         os.environ["HF_HOME"] = "/tmp"
         os.environ["XDG_CACHE_HOME"] = "/tmp"
+        os.environ["TORCH_HOME"] = "/tmp"
 
         model = whisper.load_model(model_name)
         results = model.transcribe(file)

@@ -31,9 +31,9 @@ func InitializeDB(dbPath string) error {
 	}
 
 	// Set connection pool settings
-	DB.SetMaxOpenConns(10)
-	DB.SetMaxIdleConns(5)
-	DB.SetConnMaxLifetime(30 * time.Minute)
+	DB.SetMaxOpenConns(5)
+	DB.SetMaxIdleConns(2)
+	DB.SetConnMaxLifetime(15 * time.Minute)
 
 	_, err = DB.Exec(`CREATE TABLE IF NOT EXISTS urls (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -225,7 +225,8 @@ func executeTranscriptionScript(ctx context.Context, url string) ([]byte, error)
 		"PYTHONUNBUFFERED=1",
 		"TRANSFORMERS_CACHE=/tmp",
 		"HF_HOME=/tmp",
-		"XDG_CACHE_HOME=/tmp")
+		"XDG_CACHE_HOME=/tmp",
+		"TORCH_HOME=/tmp")
 
 	// Create a pipe for the command output
 	cmd.Dir = "/app"
