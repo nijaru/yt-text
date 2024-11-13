@@ -46,18 +46,31 @@ func LoadConfig() *Config {
 
 		// Spaces Configuration
 		SpacesEnabled:  getEnvAsBool("SPACES_ENABLED", false),
-        SpacesKey:     GetEnv("SPACES_KEY", ""),
-        SpacesSecret:  GetEnv("SPACES_SECRET", ""),
-        SpacesRegion:  GetEnv("SPACES_REGION", "nyc3"),
-        SpacesEndpoint: GetEnv("SPACES_ENDPOINT", "https://nyc3.digitaloceanspaces.com"),
-        SpacesBucket:  GetEnv("SPACES_BUCKET", "yt-text"),
-    }
+		SpacesKey:      GetEnv("SPACES_KEY", ""),
+		SpacesSecret:   GetEnv("SPACES_SECRET", ""),
+		SpacesRegion:   GetEnv("SPACES_REGION", "nyc3"),
+		SpacesEndpoint: GetEnv("SPACES_ENDPOINT", "https://nyc3.digitaloceanspaces.com"),
+		SpacesBucket:   GetEnv("SPACES_BUCKET", "yt-text"),
 	}
 }
 
 func GetEnv(key, defaultValue string) string {
 	if value, exists := os.LookupEnv(key); exists {
 		return value
+	}
+	return defaultValue
+}
+
+func getEnvAsBool(key string, defaultValue bool) bool {
+	if value, exists := os.LookupEnv(key); exists {
+		if boolValue, err := strconv.ParseBool(value); err == nil {
+			return boolValue
+		}
+		logrus.WithFields(logrus.Fields{
+			"key":          key,
+			"value":        value,
+			"defaultValue": defaultValue,
+		}).Warn("Invalid boolean, using default")
 	}
 	return defaultValue
 }
