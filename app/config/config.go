@@ -34,6 +34,19 @@ type Config struct {
 	TranscriptionTemperature float64
 	TranscriptionBeamSize    int
 	TranscriptionBestOf      int
+
+	// Whisper Configuration
+	WhisperDownloadRoot string
+	CudaVisibleDevices  string
+	ModelsDir           string
+	CacheDir            string
+	TempDir             string
+
+	// Resource Management
+	MemoryLimit         int64
+	GCPercent           int
+	MallocTrimThreshold int
+	MallocArenaMax      int
 }
 
 func LoadConfig() *Config {
@@ -61,6 +74,19 @@ func LoadConfig() *Config {
 		TranscriptionTemperature: getEnvAsFloat("TRANSCRIPTION_TEMPERATURE", 0.2),
 		TranscriptionBeamSize:    getEnvAsInt("TRANSCRIPTION_BEAM_SIZE", 2),
 		TranscriptionBestOf:      getEnvAsInt("TRANSCRIPTION_BEST_OF", 1),
+
+		// Whisper Configuration
+		WhisperDownloadRoot: GetEnv("WHISPER_DOWNLOAD_ROOT", "/tmp/models"),
+		CudaVisibleDevices:  GetEnv("CUDA_VISIBLE_DEVICES", ""),
+		ModelsDir:           GetEnv("MODELS_DIR", "/tmp/models"),
+		CacheDir:            GetEnv("CACHE_DIR", "/tmp/cache"),
+		TempDir:             GetEnv("TEMP_DIR", "/tmp"),
+
+		// Resource Management
+		MemoryLimit:         getEnvAsInt64("MEMORY_LIMIT", 1536*1024*1024), // 1.5GB default
+		GCPercent:           getEnvAsInt("GOGC", 10),
+		MallocTrimThreshold: getEnvAsInt("MALLOC_TRIM_THRESHOLD_", 100000),
+		MallocArenaMax:      getEnvAsInt("MALLOC_ARENA_MAX", 1),
 	}
 }
 
@@ -113,6 +139,20 @@ func getEnvAsInt(key string, defaultValue int) int {
 	return defaultValue
 }
 
+func getEnvAsInt64(key string, defaultValue int64) int64 {
+	if value, exists := os.LookupEnv(key); exists {
+		if intValue, err := strconv.ParseInt(value, 10, 64); err == nil {
+			return intValue
+		}
+		logrus.WithFields(logrus.Fields{
+			"key":          key,
+			"value":        value,
+			"defaultValue": defaultValue,
+		}).Warn("Invalid int64, using default")
+	}
+	return defaultValue
+}
+
 func getEnvAsFloat(key string, defaultValue float64) float64 {
 	if value, exists := os.LookupEnv(key); exists {
 		if floatValue, err := strconv.ParseFloat(value, 64); err == nil {
@@ -125,6 +165,22 @@ func getEnvAsFloat(key string, defaultValue float64) float64 {
 		}).Warn("Invalid float, using default")
 	}
 	return defaultValue
+}
+
+func (c *Config) GetTranscriptionEnv() []string {
+	return []string{
+		"PYTHONUNBUFFERED=1",
+		"PYTHONDONTWRITEBYTECODE=1",
+		"PYTHONPATH=/app",
+		"MALLOC_TRIM_THRESHOLD_=" + strconv.Itoa(c.MallocTrimThreshold),
+		"MALLOC_ARENA_MAX=" + strconv.Itoa(c.MallocArenaMax),
+		"PYTHONMALLOC=malloc",
+		"WHISPER_DOWNLOAD_ROOT=" + c.WhisperDownloadRoot,
+		"MODELS_DIR=" + c.ModelsDir,
+		"CACHE_DIR=" + c.CacheDir,
+		"TEMP_DIR=" + c.TempDir,
+		"CUDA_VISIBLE_DEVICES=" + c.CudaVisibleDevices,
+	}
 }
 
 func ValidateConfig(cfg *Config) error {
@@ -155,5 +211,28 @@ func ValidateConfig(cfg *Config) error {
 	if cfg.IdleTimeout <= 0 {
 		return errors.New("idle timeout must be greater than 0")
 	}
+
+	// Validate Whisper configuration
+	if cfg.WhisperDownloadRoot == "" {
+		return errors.New("whisper download root is required")
+	}
+	if cfg.ModelsDir == "" {
+		return errors.New("models directory is required")
+	}
+	if cfg.CacheDir == "" {
+		return errors.New("cache directory is required")
+	}
+	if cfg.TempDir == "" {
+		return errors.New("temp directory is required")
+	}
+
+	// Validate resource limits
+	if cfg.MemoryLimit <= 0 {
+		return errors.New("memory limit must be greater than 0")
+	}
+	if cfg.MallocTrimThreshold <= 0 {
+		return errors.New("malloc trim threshold must be greater than 0")
+	}
+
 	return nil
 }

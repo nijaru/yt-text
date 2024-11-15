@@ -1,0 +1,76 @@
+FROM golang:1.23 AS builder
+WORKDIR /src
+
+ARG GOMEMLIMIT
+ARG GOGC
+ARG GOMAXPROCS
+
+# Production build optimizations
+ENV GOMAXPROCS=${GOMAXPROCS:-2}
+ENV GOPROXY=direct
+ENV GO111MODULE=on
+ENV CGO_ENABLED=1
+ENV GOGC=${GOGC:-10}
+ENV GOMEMLIMIT=${GOMEMLIMIT:-1024MiB}
+ENV GOAMD64=v3
+
+COPY app/go.mod app/go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download
+
+COPY app/ ./
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go build \
+    -ldflags='-w -s' \
+    -gcflags='-m=2' \
+    -tags 'netgo osusergo static_build' \
+    -trimpath \
+    -o /bin/main .
+
+FROM python:3.12-slim-bookworm AS runner
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    WHISPER_DOWNLOAD_ROOT=/tmp \
+    PYTHONPATH=/app \
+    MALLOC_TRIM_THRESHOLD_=100000 \
+    MALLOC_MMAP_THRESHOLD_=100000 \
+    PYTHONMALLOC=malloc \
+    PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:32 \
+    GOMAXPROCS=1 \
+    GOGC=10
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd -r appuser && useradd -r -g appuser appuser
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+WORKDIR /app
+
+COPY python/pyproject.toml ./
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync
+
+COPY python/scripts ./scripts/
+COPY --from=builder /bin/main /usr/local/bin/main
+COPY static/ /app/static/
+
+RUN mkdir -p /app/logs /app/data /tmp/transcribe /tmp/models \
+    && chown -R appuser:appuser /app /tmp/transcribe /tmp/models \
+    && chmod -R 755 /app/scripts/*.py \
+    && chmod 1777 /tmp
+
+USER appuser
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD curl -f http://localhost:8080/health || exit 1
+
+EXPOSE 8080
+
+ENTRYPOINT ["/usr/local/bin/main"]

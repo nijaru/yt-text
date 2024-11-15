@@ -12,9 +12,10 @@ import time
 import uuid
 from dataclasses import asdict, dataclass
 
+import numpy as np
 import torch
-import whisper
 import yt_dlp
+from faster_whisper import WhisperModel
 from pydub import AudioSegment
 
 # System Constants
@@ -46,7 +47,7 @@ class TranscriptionConfig:
         """Validate configuration on creation"""
         self.validate()
 
-    def validate(self) -> None:
+    def validate(self):
         """Validate all configuration settings"""
         if not 0.0 <= self.temperature <= 1.0:
             raise ValueError("Temperature must be between 0.0 and 1.0")
@@ -54,13 +55,17 @@ class TranscriptionConfig:
             raise ValueError("Beam size must be between 0 and 5")
         if not 1 <= self.best_of <= 5:
             raise ValueError("Best of must be between 1 and 5")
-        if self.processing_level not in ["none", "light", "heavy"]:
+        if self.processing_level not in [
+            "none",
+            "light",
+            "medium",
+        ]:  # Changed from "heavy"
             raise ValueError("Invalid processing level")
 
         # Validate video constraints
         self.validate_video_constraints()
 
-    def validate_video_constraints(self) -> None:
+    def validate_video_constraints(self):
         """Validate video length and size"""
         duration = check_video_length(self.url)
         if duration > MAX_VIDEO_DURATION:
@@ -102,8 +107,8 @@ class AudioProcessor:
             audio = self._load_audio(file_path)
             audio = self._optimize_audio(audio)
 
-            if self.processing_level == "heavy":
-                audio = self._apply_heavy_processing(audio)
+            if self.processing_level == "medium":
+                audio = self._apply_medium_processing(audio)
 
             # Export with optimal settings
             self._export_audio(audio, temp_path)
@@ -132,38 +137,47 @@ class AudioProcessor:
             audio.set_frame_rate(AUDIO_SAMPLE_RATE)
             .set_channels(1)
             .normalize()
-            .high_pass_filter(80)
-            .low_pass_filter(8000)
+            .high_pass_filter(AUDIO_HIGH_PASS)
+            .low_pass_filter(AUDIO_LOW_PASS)
         )
 
-    def _apply_heavy_processing(self, audio: AudioSegment) -> AudioSegment:
-        """Apply intensive audio processing"""
-        import numpy as np
-
-        # Convert to numpy array
+    def _apply_medium_processing(self, audio: AudioSegment) -> AudioSegment:
+        """Apply enhanced processing without librosa dependency"""
+        # Convert to numpy array for processing
         samples = np.array(audio.get_array_of_samples(), dtype=np.float32)
 
-        # Apply advanced processing
-        samples = self._apply_noise_reduction(samples)
+        # Simple noise reduction using rolling median
+        window_size = int(AUDIO_SAMPLE_RATE / 10)  # 100ms window
+        samples = self._rolling_median_filter(samples, window_size)
 
-        # Rebuild audio segment
-        return AudioSegment(
+        # Rebuild audio segment with processed samples
+        processed_audio = AudioSegment(
             samples.astype(np.int16).tobytes(),
             frame_rate=AUDIO_SAMPLE_RATE,
             sample_width=2,
             channels=1,
-        ).compress_dynamic_range(threshold=-15.0, ratio=3.0)
-
-    def _apply_noise_reduction(self, samples: np.ndarray) -> np.ndarray:
-        """Apply noise reduction to samples"""
-        import librosa
-
-        return librosa.decompose.nn_filter(
-            samples,
-            aggregate=np.median,
-            metric="cosine",
-            width=int(AUDIO_SAMPLE_RATE / 10),
         )
+
+        # Apply dynamic range compression
+        return processed_audio.compress_dynamic_range(threshold=-20.0, ratio=2.5)
+
+    def _rolling_median_filter(
+        self, samples: np.ndarray, window_size: int
+    ) -> np.ndarray:
+        """Apply a rolling median filter for noise reduction"""
+        # Ensure window size is odd
+        window_size = window_size + 1 if window_size % 2 == 0 else window_size
+
+        # Pad the array to handle edges
+        pad_width = window_size // 2
+        padded = np.pad(samples, pad_width, mode="edge")
+
+        # Apply rolling median
+        result = np.zeros_like(samples)
+        for i in range(len(samples)):
+            result[i] = np.median(padded[i : i + window_size])
+
+        return result
 
     def _export_audio(self, audio: AudioSegment, output_path: str) -> None:
         """Export audio with optimal settings"""
@@ -198,25 +212,24 @@ class Transcriber:
         finally:
             self._cleanup()
 
-    def _setup_model(self) -> whisper.Whisper:
+    def _setup_model(self) -> WhisperModel:
         """Initialize the Whisper model"""
         device = "cuda" if torch.cuda.is_available() else "cpu"
-        model = whisper.load_model(self.config.model_name)
+        compute_type = "float16" if device == "cuda" else "float32"
 
-        if device == "cuda":
-            model = model.half()
-
-        return model.to(device)
+        return WhisperModel(
+            self.config.model_name, device=device, compute_type=compute_type
+        )
 
     def _perform_transcription(self, audio_file: str) -> str:
         """Perform the actual transcription"""
-        results = self.model.transcribe(
+        segments, _ = self.model.transcribe(
             audio_file,
             temperature=self.config.temperature,
             beam_size=self.config.beam_size,
             best_of=self.config.best_of,
         )
-        return results["text"]
+        return " ".join([segment.text.strip() for segment in segments])
 
     def _cleanup(self) -> None:
         """Clean up model resources"""
@@ -377,8 +390,6 @@ def parse_args():
     parser.add_argument(
         "--json", action="store_true", help="Return the transcription as a JSON object"
     )
-
-    # Add transcription settings
     parser.add_argument(
         "--temperature",
         type=float,
@@ -399,7 +410,7 @@ def parse_args():
     )
     parser.add_argument(
         "--processing-level",
-        choices=["none", "light", "heavy"],
+        choices=["none", "light", "medium"],  # Changed from "heavy"
         default="light",
         help="Audio processing level (default: light)",
     )

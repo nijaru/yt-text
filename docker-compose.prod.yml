@@ -2,18 +2,13 @@ services:
   app:
     build:
       context: .
+      dockerfile: Dockerfile.prod
       target: runner
       args:
         GOMEMLIMIT: 1024MiB
         GOGC: 10
         GOMAXPROCS: 1
-      cache_from:
-        - type=registry,ref=yt-text:latest
-      cache_to:
-        - type=inline
-    image: yt-text:latest
-    ports:
-      - "8080:8080"
+    image: yt-text:${TAG:-latest}
     environment:
       # Server Configuration
       - DB_PATH=/tmp/urls.db
@@ -33,12 +28,7 @@ services:
       - PYTHONDONTWRITEBYTECODE=1
       - PYTHONUNBUFFERED=1
       - WHISPER_DOWNLOAD_ROOT=/tmp
-      - NUMBA_CACHE_DIR=/tmp
       - PYTHONPATH=/app
-      - TRANSFORMERS_CACHE=/tmp
-      - HF_HOME=/tmp
-      - XDG_CACHE_HOME=/tmp
-      - TORCH_HOME=/tmp
 
       # Resource Management
       - PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:32
@@ -64,6 +54,11 @@ services:
         reservations:
           cpus: "0.25"
           memory: 512M
+    ulimits:
+      nproc: 65535
+      nofile:
+        soft: 20000
+        hard: 40000
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s
@@ -82,4 +77,3 @@ services:
 networks:
   yt_text_net:
     driver: bridge
-    internal: true

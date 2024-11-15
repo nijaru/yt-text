@@ -182,3 +182,20 @@ cython_debug/
 
 # Go workspace file
 go.work
+
+# Development/IDE specific
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Build artifacts
+/bin/
+/dist/
+
+# Local development
+/tmp/
+/logs/
+.env.local
+.env.development
+.env.production

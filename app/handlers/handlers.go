@@ -228,3 +228,20 @@ func sendJSONResponse(w http.ResponseWriter, text, modelName string) error {
 	logrus.Info("JSON response sent successfully")
 	return nil
 }
+
+func HealthCheckHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		utils.RespondWithError(w, errors.New(http.StatusMethodNotAllowed, "Method not allowed", nil))
+		return
+	}
+
+	response := struct {
+		Status string `json:"status"`
+	}{
+		Status: "ok",
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(response)
+}

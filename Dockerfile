@@ -1,46 +1,27 @@
 FROM golang:1.23 AS builder
 WORKDIR /src
 
-# More aggressive build-time memory limits
-ENV GOMAXPROCS=2
-ENV GOPROXY=direct
 ENV GO111MODULE=on
 ENV CGO_ENABLED=1
-ENV GOGC=10
-ENV GOMEMLIMIT=1024MiB
 
-# Optimize dependency installation
 COPY app/go.mod app/go.sum ./
-RUN --mount=type=cache,target=/go/pkg/mod \
-    go mod download
+RUN go mod download
 
-# Build with optimizations
 COPY app/ ./
-RUN --mount=type=cache,target=/go/pkg/mod \
-    --mount=type=cache,target=/root/.cache/go-build \
-    go build \
-    -ldflags='-w -s' \
-    -gcflags='-m=2' \
-    -tags 'netgo osusergo static_build' \
-    -trimpath \
-    -o /bin/main .
+RUN go build -o /bin/main .
 
 FROM python:3.12-slim-bookworm AS runner
 
-# Set environment variables for optimization
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    WHISPER_DOWNLOAD_ROOT=/tmp \
-    NUMBA_CACHE_DIR=/tmp \
     PYTHONPATH=/app \
-    MALLOC_TRIM_THRESHOLD_=100000 \
-    MALLOC_MMAP_THRESHOLD_=100000 \
-    PYTHONMALLOC=malloc \
-    PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:32
+    UV_CACHE_DIR=/tmp/uv-cache \
+    XDG_CACHE_HOME=/tmp/cache \
+    TRANSFORMERS_CACHE=/tmp \
+    HF_HOME=/tmp
 
-RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    apt-get update && apt-get install -y --no-install-recommends \
+# Install required system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     git \
     curl \
@@ -51,21 +32,25 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 WORKDIR /app
 
-# Install dependencies with caching
-COPY python/pyproject.toml ./
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --system
+# Create cache directories
+RUN mkdir -p /tmp/uv-cache && \
+    mkdir -p /tmp/cache && \
+    chmod -R 755 /tmp/uv-cache && \
+    chmod -R 755 /tmp/cache
 
-# Copy application files
+COPY python/pyproject.toml ./
+RUN uv sync
+
 COPY python/scripts ./scripts/
 COPY --from=builder /bin/main /usr/local/bin/main
 COPY static/ /app/static/
 
-# Set up directories and permissions
 RUN mkdir -p /app/logs /app/data /tmp/transcribe \
     && chown -R appuser:appuser /app /tmp/transcribe \
     && chmod -R 755 /app/scripts/*.py \
-    && chmod 1777 /tmp
+    && chmod 1777 /tmp \
+    && chown -R appuser:appuser /tmp/uv-cache \
+    && chown -R appuser:appuser /tmp/cache
 
 USER appuser
 

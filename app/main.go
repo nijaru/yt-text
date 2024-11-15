@@ -142,6 +142,7 @@ func main() {
 	mux.HandleFunc("/static/", serveStaticFiles)
 	mux.HandleFunc("/", serveIndex)
 	mux.HandleFunc("/transcribe", handlers.TranscribeHandler)
+	mux.HandleFunc("/health", handlers.HealthCheckHandler)
 
 	// Chain middleware in the correct order
 	handler := corsMiddleware(

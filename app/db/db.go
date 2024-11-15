@@ -21,13 +21,13 @@ func InitializeDB(dbPath string) error {
 	// Ensure the directory for the database file exists
 	dir := filepath.Dir(dbPath)
 	if err := os.MkdirAll(dir, os.ModePerm); err != nil {
-		return fmt.Errorf("error creating directory for database: %v", err)
+		return errors.ErrDatabaseOperation(fmt.Errorf("creating directory for database: %w", err))
 	}
 
 	var err error
 	DB, err = sql.Open("sqlite3", dbPath)
 	if err != nil {
-		return fmt.Errorf("error opening database: %v", err)
+		return errors.ErrDatabaseOperation(fmt.Errorf("opening database: %w", err))
 	}
 
 	// Set connection pool settings
@@ -36,23 +36,23 @@ func InitializeDB(dbPath string) error {
 	DB.SetConnMaxLifetime(15 * time.Minute)
 
 	_, err = DB.Exec(`CREATE TABLE IF NOT EXISTS urls (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    url TEXT NOT NULL UNIQUE,
-                    text TEXT,
-                    status TEXT NOT NULL DEFAULT 'pending',
-                    model_name TEXT NOT NULL DEFAULT '',
-                    summary TEXT,
-                    summary_model_name TEXT
-    )`)
+																				id INTEGER PRIMARY KEY AUTOINCREMENT,
+																				url TEXT NOT NULL UNIQUE,
+																				text TEXT,
+																				status TEXT NOT NULL DEFAULT 'pending',
+																				model_name TEXT NOT NULL DEFAULT '',
+																				summary TEXT,
+																				summary_model_name TEXT
+				)`)
 	if err != nil {
 		DB.Close() // Close the database connection in case of an error
-		return fmt.Errorf("error creating table: %v", err)
+		return errors.ErrDatabaseOperation(fmt.Errorf("creating table: %w", err))
 	}
 
 	_, err = DB.Exec(`CREATE INDEX IF NOT EXISTS idx_urls_url ON urls(url)`)
 	if err != nil {
 		DB.Close()
-		return fmt.Errorf("error creating index: %v", err)
+		return errors.ErrDatabaseOperation(fmt.Errorf("creating index: %w", err))
 	}
 
 	// Add context with timeout for initialization
@@ -61,7 +61,7 @@ func InitializeDB(dbPath string) error {
 
 	// Test connection with timeout
 	if err := DB.PingContext(ctx); err != nil {
-		return fmt.Errorf("error connecting to database: %v", err)
+		return errors.ErrDatabaseOperation(fmt.Errorf("connecting to database: %w", err))
 	}
 
 	return nil
@@ -93,7 +93,7 @@ func GetModelName(ctx context.Context, url string) (string, error) {
 		if err == sql.ErrNoRows {
 			return "", nil
 		}
-		return "", fmt.Errorf("error querying database: %v", err)
+		return "", errors.ErrDatabaseOperation(fmt.Errorf("querying model name: %w", err))
 	}
 	return modelName, nil
 }
@@ -129,24 +129,24 @@ func SetTranscription(ctx context.Context, url, text, modelName string) error {
 func SetTranscriptionStatus(ctx context.Context, url, status string) error {
 	tx, err := DB.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("error beginning transaction: %v", err)
+		return errors.ErrDatabaseOperation(fmt.Errorf("beginning transaction: %w", err))
 	}
 
 	stmt, err := tx.PrepareContext(ctx, "UPDATE urls SET status = ? WHERE url = ?")
 	if err != nil {
 		tx.Rollback()
-		return fmt.Errorf("error preparing statement: %v", err)
+		return errors.ErrDatabaseOperation(fmt.Errorf("preparing statement: %w", err))
 	}
 	defer stmt.Close()
 
 	_, err = stmt.ExecContext(ctx, status, url)
 	if err != nil {
 		tx.Rollback()
-		return fmt.Errorf("error executing statement: %v", err)
+		return errors.ErrDatabaseOperation(fmt.Errorf("executing statement: %w", err))
 	}
 
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("error committing transaction: %v", err)
+		return errors.ErrDatabaseOperation(fmt.Errorf("committing transaction: %w", err))
 	}
 
 	return nil
@@ -155,24 +155,24 @@ func SetTranscriptionStatus(ctx context.Context, url, status string) error {
 func DeleteTranscription(ctx context.Context, url string) error {
 	tx, err := DB.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("error beginning transaction: %v", err)
+		return errors.ErrDatabaseOperation(fmt.Errorf("beginning transaction: %w", err))
 	}
 
 	stmt, err := tx.PrepareContext(ctx, "DELETE FROM urls WHERE url = ?")
 	if err != nil {
 		tx.Rollback()
-		return fmt.Errorf("error preparing delete statement: %v", err)
+		return errors.ErrDatabaseOperation(fmt.Errorf("preparing delete statement: %w", err))
 	}
 	defer stmt.Close()
 
 	_, err = stmt.ExecContext(ctx, url)
 	if err != nil {
 		tx.Rollback()
-		return fmt.Errorf("error executing delete statement: %v", err)
+		return errors.ErrDatabaseOperation(fmt.Errorf("executing delete statement: %w", err))
 	}
 
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("error committing transaction: %v", err)
+		return errors.ErrDatabaseOperation(fmt.Errorf("committing transaction: %w", err))
 	}
 
 	return nil
@@ -186,7 +186,7 @@ func GetSummary(ctx context.Context, url string) (string, string, error) {
 		if err == sql.ErrNoRows {
 			return "", "", nil
 		}
-		return "", "", fmt.Errorf("error querying database: %v", err)
+		return "", "", errors.ErrDatabaseOperation(fmt.Errorf("querying summary: %w", err))
 	}
 
 	return summary.String, summaryModelName.String, nil
@@ -196,14 +196,14 @@ func SetSummary(ctx context.Context, url, summary, summaryModelName string) erro
 	tx, err := DB.BeginTx(ctx, nil)
 	if err != nil {
 		logrus.WithError(err).Error("Error beginning transaction")
-		return fmt.Errorf("error beginning transaction: %v", err)
+		return errors.ErrDatabaseOperation(fmt.Errorf("beginning transaction: %w", err))
 	}
 
 	stmt, err := tx.PrepareContext(ctx, "INSERT INTO urls (url, summary, summary_model_name) VALUES (?, ?, ?) ON CONFLICT(url) DO UPDATE SET summary=excluded.summary, summary_model_name=excluded.summary_model_name")
 	if err != nil {
 		tx.Rollback()
 		logrus.WithError(err).Error("Error preparing statement")
-		return fmt.Errorf("error preparing statement: %v", err)
+		return errors.ErrDatabaseOperation(fmt.Errorf("preparing statement: %w", err))
 	}
 	defer stmt.Close()
 
@@ -211,12 +211,12 @@ func SetSummary(ctx context.Context, url, summary, summaryModelName string) erro
 	if err != nil {
 		tx.Rollback()
 		logrus.WithError(err).Error("Error executing statement")
-		return fmt.Errorf("error executing statement: %v", err)
+		return errors.ErrDatabaseOperation(fmt.Errorf("executing statement: %w", err))
 	}
 
 	if err := tx.Commit(); err != nil {
 		logrus.WithError(err).Error("Error committing transaction")
-		return fmt.Errorf("error committing transaction: %v", err)
+		return errors.ErrDatabaseOperation(fmt.Errorf("committing transaction: %w", err))
 	}
 
 	logrus.WithFields(logrus.Fields{

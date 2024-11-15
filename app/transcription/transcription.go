@@ -78,14 +78,14 @@ func (s *TranscriptionService) HandleTranscription(ctx context.Context, url stri
 	text, status, err := db.GetTranscription(ctx, url)
 	if err != nil {
 		logger.WithError(err).Error("Failed to get transcription from DB")
-		return "", "", err
+		return "", "", errors.ErrDatabaseOperation(err)
 	}
 
 	if status == "completed" {
 		modelName, err := db.GetModelName(ctx, url)
 		if err != nil {
 			logger.WithError(err).Error("Failed to get model name from DB")
-			return "", "", err
+			return "", "", errors.ErrDatabaseOperation(err)
 		}
 
 		if modelName == cfg.ModelName {
@@ -101,22 +101,22 @@ func (s *TranscriptionService) HandleTranscription(ctx context.Context, url stri
 
 	if err := db.SetTranscriptionStatus(ctx, url, "in_progress"); err != nil {
 		logger.WithError(err).Error("Failed to set transcription status to in_progress")
-		return "", "", fmt.Errorf("error setting transcription status: %v", err)
+		return "", "", errors.ErrDatabaseOperation(err)
 	}
 
 	if err := validation.ValidateURL(url); err != nil {
-		return "", "", err
+		return "", "", errors.ErrInvalidURL(err)
 	}
 
 	text, modelName, err := s.TranscriptionFunc(ctx, url)
 	if err != nil {
 		db.SetTranscriptionStatus(ctx, url, "failed")
 		logger.WithError(err).Error("Transcription script failed")
-		return "", "", err
+		return "", "", errors.ErrTranscriptionFailed(err)
 	}
 
 	if err := saveTranscription(ctx, url, text, modelName); err != nil {
-		return "", "", err
+		return "", "", errors.ErrDatabaseOperation(err)
 	}
 
 	logger.Info("Transcription saved successfully")
@@ -129,11 +129,11 @@ func saveTranscription(ctx context.Context, url, text, modelName string) error {
 	}
 
 	if err := db.SetTranscription(ctx, url, text, modelName); err != nil {
-		return fmt.Errorf("error saving transcription: %w", err)
+		return errors.ErrDatabaseOperation(err)
 	}
 
 	if err := db.SetTranscriptionStatus(ctx, url, "completed"); err != nil {
-		return fmt.Errorf("error setting transcription status: %w", err)
+		return errors.ErrDatabaseOperation(err)
 	}
 
 	return nil
@@ -150,7 +150,7 @@ func (s *TranscriptionService) runTranscriptionScript(ctx context.Context, url s
 	// Extract JSON part from the output
 	jsonPart, err := extractJSON(output)
 	if err != nil {
-		return "", "", fmt.Errorf("failed to extract JSON from output: %v", err)
+		return "", "", errors.ErrTranscriptionFailed(fmt.Errorf("failed to extract JSON from output: %v", err))
 	}
 
 	// Parse the JSON
@@ -159,7 +159,7 @@ func (s *TranscriptionService) runTranscriptionScript(ctx context.Context, url s
 		ModelName     string `json:"model_name"`
 	}
 	if err := json.Unmarshal([]byte(jsonPart), &response); err != nil {
-		return "", "", fmt.Errorf("failed to parse JSON: %v", err)
+		return "", "", errors.ErrTranscriptionFailed(fmt.Errorf("failed to parse JSON: %v", err))
 	}
 
 	logrus.WithField("url", url).Info("Transcription completed successfully")
@@ -170,7 +170,7 @@ func extractJSON(output []byte) (string, error) {
 	re := regexp.MustCompile(`\{.*\}`)
 	matches := re.Find(output)
 	if matches == nil {
-		return "", fmt.Errorf("no JSON found in output")
+		return "", errors.ErrTranscriptionFailed(fmt.Errorf("no JSON found in output"))
 	}
 	return string(matches), nil
 }
@@ -204,7 +204,7 @@ func (s *TranscriptionService) executeTranscriptionWithRetry(ctx context.Context
 
 		if attempt == maxRetries {
 			logger.Error("All transcription attempts failed")
-			return nil, fmt.Errorf("error transcribing after %d attempts: %v, output: %s", maxRetries, err, output)
+			return nil, errors.ErrTranscriptionFailed(fmt.Errorf("error transcribing after %d attempts: %v, output: %s", maxRetries, err, output))
 		}
 
 		// Calculate backoff duration
@@ -238,7 +238,7 @@ func (s *TranscriptionService) executeTranscriptionWithRetry(ctx context.Context
 			"error":      err,
 			"output":     string(output),
 		}).Error("Transcription failed after max retries")
-		return nil, fmt.Errorf("error transcribing after %d attempts: %v, output: %s", maxRetries, err, output)
+		return nil, errors.ErrTranscriptionFailed(fmt.Errorf("error transcribing after %d attempts: %v, output: %s", maxRetries, err, output))
 	}
 
 	return output, nil
@@ -248,44 +248,49 @@ func executeTranscriptionScript(ctx context.Context, url string, cfg *config.Con
 	cmd := execCommand("uv", "run", "/app/scripts/transcribe.py",
 		url,
 		"--json",
+		"--model", cfg.ModelName,
 		"--temperature", fmt.Sprintf("%.2f", cfg.TranscriptionTemperature),
 		"--beam-size", fmt.Sprintf("%d", cfg.TranscriptionBeamSize),
 		"--best-of", fmt.Sprintf("%d", cfg.TranscriptionBestOf),
 	)
 
-	cmd.Env = append(os.Environ(),
-		"PYTHONUNBUFFERED=1",
-		"TRANSFORMERS_CACHE=/tmp",
-		"HF_HOME=/tmp",
-		"XDG_CACHE_HOME=/tmp",
-		"TORCH_HOME=/tmp",
-		"MALLOC_TRIM_THRESHOLD_=100000",
-		"MALLOC_MMAP_THRESHOLD_=100000",
-		"PYTHONMALLOC=malloc")
+	// Use the new environment configuration with memory limits
+	env := append(os.Environ(), cfg.GetTranscriptionEnv()...)
+	env = append(env, []string{
+		fmt.Sprintf("MALLOC_ARENA_MAX=%d", 1),
+		fmt.Sprintf("MALLOC_TRIM_THRESHOLD_=%d", cfg.MallocTrimThreshold),
+		fmt.Sprintf("PYTHONMALLOC=malloc"),
+		fmt.Sprintf("PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:%d", 32),
+	}...)
 
+	cmd.Env = env
 	cmd.Dir = "/app"
-
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		if len(output) > 0 {
-			return nil, fmt.Errorf("error executing transcription script: %v, output: %s", err, output)
+		// Check for memory-related errors in the output
+		if strings.Contains(string(output), "MemoryError") ||
+			strings.Contains(string(output), "OutOfMemoryError") {
+			return nil, errors.ErrTranscriptionFailed(fmt.Errorf("insufficient memory"))
 		}
-		return nil, fmt.Errorf("error executing transcription script: %v", err)
+
+		if len(output) > 0 {
+			return nil, errors.ErrTranscriptionFailed(fmt.Errorf("error executing transcription script: %v, output: %s", err, output))
+		}
+		return nil, errors.ErrTranscriptionFailed(fmt.Errorf("error executing transcription script: %v", err))
 	}
 
 	return output, nil
 }
-
 func readTranscriptionFile(filename string) (string, error) {
 	fileContent, err := os.ReadFile(filename)
 	if err != nil {
 		logrus.WithError(err).WithField("filename", filename).Error("Failed to read file")
-		return "", fmt.Errorf("error reading file: %v", err)
+		return "", errors.ErrTranscriptionFailed(fmt.Errorf("error reading file: %v", err))
 	}
 	text := string(fileContent)
 	if text == "" {
 		logrus.WithField("filename", filename).Error("Transcription resulted in empty text")
-		return "", fmt.Errorf("error transcribing")
+		return "", errors.ErrTranscriptionFailed(fmt.Errorf("empty transcription text"))
 	}
 
 	return utils.FormatText(text), nil
@@ -297,21 +302,20 @@ func extractFilename(output []byte) (string, error) {
 
 	if filename == "" {
 		logrus.Error("Transcription script returned an empty filename")
-		return "", fmt.Errorf("error: transcription script returned an empty filename")
+		return "", errors.ErrTranscriptionFailed(fmt.Errorf("empty filename returned"))
 	}
 
 	return filename, nil
 }
-
 func validateTranscriptionFile(filename string) error {
 	_, err := os.Stat(filename)
 	if err != nil {
 		if os.IsNotExist(err) {
 			logrus.WithField("filename", filename).Error("Transcription file does not exist")
-			return fmt.Errorf("error: transcription file does not exist: %s", filename)
+			return errors.ErrTranscriptionFailed(fmt.Errorf("transcription file does not exist: %s", filename))
 		}
 		logrus.WithError(err).WithField("filename", filename).Error("Failed to stat file")
-		return fmt.Errorf("error: failed to stat file: %v", err)
+		return errors.ErrTranscriptionFailed(fmt.Errorf("failed to stat file: %v", err))
 	}
 	return nil
 }
@@ -325,12 +329,12 @@ func generateSummary(ctx context.Context, text string) (string, string, error) {
 			"error":  err,
 			"output": string(output),
 		}).Error("Error executing summarization script")
-		return "", "", fmt.Errorf("error executing summarization script: %v, output: %s", err, output)
+		return "", "", errors.ErrTranscriptionFailed(fmt.Errorf("error executing summarization script: %v, output: %s", err, output))
 	}
 
 	jsonPart, err := extractFinalJSON(output)
 	if err != nil {
-		return "", "", fmt.Errorf("failed to extract JSON from output: %v", err)
+		return "", "", errors.ErrTranscriptionFailed(fmt.Errorf("failed to extract JSON from output: %v", err))
 	}
 
 	var result struct {
@@ -344,12 +348,12 @@ func generateSummary(ctx context.Context, text string) (string, string, error) {
 			"error":  err,
 			"output": string(output),
 		}).Error("Error parsing JSON output")
-		return "", "", fmt.Errorf("error parsing JSON output: %v, output: %s", err, output)
+		return "", "", errors.ErrTranscriptionFailed(fmt.Errorf("error parsing JSON output: %v, output: %s", err, output))
 	}
 
 	if result.Error != "" {
 		logrus.WithField("error", result.Error).Error("Summarization error")
-		return "", "", fmt.Errorf("summarization error: %s", result.Error)
+		return "", "", errors.ErrTranscriptionFailed(fmt.Errorf("summarization error: %s", result.Error))
 	}
 
 	return result.Summary, result.ModelName, nil
@@ -359,7 +363,7 @@ func extractFinalJSON(output []byte) (string, error) {
 	re := regexp.MustCompile(`\{.*\}`)
 	matches := re.FindAll(output, -1)
 	if len(matches) == 0 {
-		return "", fmt.Errorf("no JSON found in output")
+		return "", errors.ErrTranscriptionFailed(fmt.Errorf("no JSON found in output"))
 	}
 	return string(matches[len(matches)-1]), nil
 }

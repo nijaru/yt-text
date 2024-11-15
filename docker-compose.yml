@@ -4,8 +4,6 @@ services:
       context: .
       target: runner
     image: yt-text:latest
-    ports:
-      - "8080:8080"
     environment:
       # Server Configuration
       - DB_PATH=/tmp/urls.db
@@ -14,18 +12,17 @@ services:
       - WRITE_TIMEOUT=60s
       - IDLE_TIMEOUT=120s
       - TRANSCRIBE_TIMEOUT=60m
-      - RATE_LIMIT=5         # More lenient for development
+      - RATE_LIMIT=5
       - RATE_LIMIT_INTERVAL=5s
 
-      # Model Configuration - Larger models for better accuracy during development
+      # Model Configuration
       - MODEL_NAME=base.en
       - SUMMARY_MODEL_NAME=facebook/bart-large-cnn
 
       # Python Environment
       - PYTHONDONTWRITEBYTECODE=1
       - PYTHONUNBUFFERED=1
-      - WHISPER_DOWNLOAD_ROOT=/tmp
-      - NUMBA_CACHE_DIR=/tmp
+      - WHISPER_DOWNLOAD_ROOT=/tmp/models
       - PYTHONPATH=/app
       - TRANSFORMERS_CACHE=/tmp
       - HF_HOME=/tmp
@@ -33,19 +30,18 @@ services:
       - TORCH_HOME=/tmp
 
     volumes:
-      # Mount source code for live reloading
       - ./app:/app/src
       - ./python/scripts:/app/scripts
       - ./static:/app/static
+      - whisper_cache:/tmp/models
 
     tmpfs:
       - /tmp
 
-    # No resource limits in development for faster processing
     deploy:
       resources:
         reservations:
-          memory: 2G    # Minimum memory to run larger models
+          memory: 2G
 
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
@@ -60,13 +56,15 @@ services:
         max-size: "10m"
         max-file: "3"
 
-    # Enable debug ports
     ports:
-      - "8080:8080"  # Application
-      - "2345:2345"  # Delve debugger
+      - "8080:8080"
+      - "2345:2345"
 
     networks:
       - yt_text_dev
+
+volumes:
+  whisper_cache:
 
 networks:
   yt_text_dev:
