@@ -7,9 +7,12 @@ services:
       branch: main
       deploy_on_push: true
       repo: nijaru/yt-text
-    instance_size_slug: basic-m
+    instance_size_slug: basic-m # 2GB RAM, 1 vCPU
     instance_count: 1
     http_port: 8080
     envs:
       - key: DOCKER_COMPOSE_FILE
         value: docker-compose.prod.yml
+    build_command: |
+      rm -rf /tmp/* || true
+      GOMEMLIMIT=1024MiB CGO_ENABLED=1 go build -ldflags="-w -s" -o main .

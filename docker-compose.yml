@@ -1,4 +1,3 @@
-# docker-compose.yml (development)
 services:
   app:
     build:
@@ -9,56 +8,67 @@ services:
       - "8080:8080"
     environment:
       # Server Configuration
-      - DB_PATH=/tmp/urls.db # Changed to use /tmp
+      - DB_PATH=/tmp/urls.db
       - SERVER_PORT=8080
-      - READ_TIMEOUT=120s
-      - WRITE_TIMEOUT=300s
+      - READ_TIMEOUT=30s
+      - WRITE_TIMEOUT=60s
       - IDLE_TIMEOUT=120s
-      - TRANSCRIBE_TIMEOUT=30m
-      - RATE_LIMIT=2
+      - TRANSCRIBE_TIMEOUT=60m
+      - RATE_LIMIT=5         # More lenient for development
       - RATE_LIMIT_INTERVAL=5s
 
-      # Model Configuration
+      # Model Configuration - Larger models for better accuracy during development
       - MODEL_NAME=base.en
       - SUMMARY_MODEL_NAME=facebook/bart-large-cnn
 
       # Python Environment
       - PYTHONDONTWRITEBYTECODE=1
       - PYTHONUNBUFFERED=1
+      - WHISPER_DOWNLOAD_ROOT=/tmp
+      - NUMBA_CACHE_DIR=/tmp
+      - PYTHONPATH=/app
       - TRANSFORMERS_CACHE=/tmp
       - HF_HOME=/tmp
       - XDG_CACHE_HOME=/tmp
       - TORCH_HOME=/tmp
 
-      # Resource Management
-      - PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:32
-      - MALLOC_ARENA_MAX=2
-      - GOMAXPROCS=1
-      - GOGC=50
+    volumes:
+      # Mount source code for live reloading
+      - ./app:/app/src
+      - ./python/scripts:/app/scripts
+      - ./static:/app/static
 
-      # Spaces Configuration
-      - SPACES_ENABLED=true
-      - SPACES_KEY=${SPACES_KEY}
-      - SPACES_SECRET=${SPACES_SECRET}
-      - SPACES_REGION=nyc3
-      - SPACES_ENDPOINT=https://nyc3.digitaloceanspaces.com
-      - SPACES_BUCKET=yt-text
-    restart: unless-stopped
-    security_opt:
-      - no-new-privileges:true
-    read_only: true
     tmpfs:
       - /tmp
+
+    # No resource limits in development for faster processing
     deploy:
       resources:
-        limits:
-          cpus: "4.0"
-          memory: 8G
         reservations:
-          cpus: "1.0"
-          memory: 2G
+          memory: 2G    # Minimum memory to run larger models
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
     logging:
       driver: "json-file"
       options:
         max-size: "10m"
         max-file: "3"
+
+    # Enable debug ports
+    ports:
+      - "8080:8080"  # Application
+      - "2345:2345"  # Delve debugger
+
+    networks:
+      - yt_text_dev
+
+networks:
+  yt_text_dev:
+    driver: bridge
+    name: yt_text_dev

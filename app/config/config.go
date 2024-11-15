@@ -29,6 +29,11 @@ type Config struct {
 	SpacesRegion   string
 	SpacesEndpoint string
 	SpacesBucket   string
+
+	// Transcription Settings
+	TranscriptionTemperature float64
+	TranscriptionBeamSize    int
+	TranscriptionBestOf      int
 }
 
 func LoadConfig() *Config {
@@ -41,7 +46,7 @@ func LoadConfig() *Config {
 		TranscribeTimeout: getEnvAsDuration("TRANSCRIBE_TIMEOUT", 30*time.Minute),
 		RateLimit:         getEnvAsInt("RATE_LIMIT", 5),
 		RateLimitInterval: getEnvAsDuration("RATE_LIMIT_INTERVAL", 5*time.Second),
-		ModelName:         GetEnv("MODEL_NAME", "base.en"),
+		ModelName:         GetEnv("MODEL_NAME", "tiny.en"),
 		SummaryModelName:  GetEnv("SUMMARY_MODEL_NAME", "facebook/bart-large-cnn"),
 
 		// Spaces Configuration
@@ -51,6 +56,11 @@ func LoadConfig() *Config {
 		SpacesRegion:   GetEnv("SPACES_REGION", "nyc3"),
 		SpacesEndpoint: GetEnv("SPACES_ENDPOINT", "https://nyc3.digitaloceanspaces.com"),
 		SpacesBucket:   GetEnv("SPACES_BUCKET", "yt-text"),
+
+		// Transcription Settings with reasonable defaults
+		TranscriptionTemperature: getEnvAsFloat("TRANSCRIPTION_TEMPERATURE", 0.2),
+		TranscriptionBeamSize:    getEnvAsInt("TRANSCRIPTION_BEAM_SIZE", 2),
+		TranscriptionBestOf:      getEnvAsInt("TRANSCRIPTION_BEST_OF", 1),
 	}
 }
 
@@ -99,6 +109,20 @@ func getEnvAsInt(key string, defaultValue int) int {
 			"value":        value,
 			"defaultValue": defaultValue,
 		}).Warn("Invalid integer, using default")
+	}
+	return defaultValue
+}
+
+func getEnvAsFloat(key string, defaultValue float64) float64 {
+	if value, exists := os.LookupEnv(key); exists {
+		if floatValue, err := strconv.ParseFloat(value, 64); err == nil {
+			return floatValue
+		}
+		logrus.WithFields(logrus.Fields{
+			"key":          key,
+			"value":        value,
+			"defaultValue": defaultValue,
+		}).Warn("Invalid float, using default")
 	}
 	return defaultValue
 }

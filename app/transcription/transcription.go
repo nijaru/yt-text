@@ -45,13 +45,16 @@ func getTranscriptionLock(url string) *transcriptionLock {
 
 type TranscriptionService struct {
 	TranscriptionFunc func(ctx context.Context, url string) (string, string, error)
-	ExecuteScriptFunc func(ctx context.Context, url string) ([]byte, error)
+	ExecuteScriptFunc func(ctx context.Context, url string, cfg *config.Config) ([]byte, error)
 	ReadFileFunc      func(filename string) (string, error)
 	SummaryFunc       func(ctx context.Context, text string) (string, string, error)
+	config            *config.Config
 }
 
-func NewTranscriptionService() *TranscriptionService {
-	s := &TranscriptionService{}
+func NewTranscriptionService(cfg *config.Config) *TranscriptionService {
+	s := &TranscriptionService{
+		config: cfg,
+	}
 	s.TranscriptionFunc = s.runTranscriptionScript
 	s.ExecuteScriptFunc = executeTranscriptionScript
 	s.ReadFileFunc = readTranscriptionFile
@@ -173,43 +176,65 @@ func extractJSON(output []byte) (string, error) {
 }
 
 func (s *TranscriptionService) executeTranscriptionWithRetry(ctx context.Context, url string) ([]byte, error) {
+	logger := logrus.WithFields(logrus.Fields{
+		"url":        url,
+		"request_id": ctx.Value(middleware.RequestIDKey),
+		"model_name": s.config.ModelName,
+	})
+
 	var (
 		output []byte
 		err    error
 	)
 
 	for attempt := 1; attempt <= maxRetries; attempt++ {
-		output, err = s.ExecuteScriptFunc(ctx, url)
+		logger = logger.WithField("attempt", attempt)
+		logger.Info("Attempting transcription")
+
+		output, err = s.ExecuteScriptFunc(ctx, url, s.config)
 		if err == nil {
+			logger.Info("Transcription attempt successful")
 			break
 		}
 
-		logrus.WithFields(logrus.Fields{
-			"attempt":    attempt,
-			"maxRetries": maxRetries,
-			"url":        url,
-			"error":      err,
-			"output":     string(output),
-		}).Error("Transcription script failed")
+		logger.WithFields(logrus.Fields{
+			"error":  err,
+			"output": string(output),
+		}).Warn("Transcription attempt failed")
 
+		if attempt == maxRetries {
+			logger.Error("All transcription attempts failed")
+			return nil, fmt.Errorf("error transcribing after %d attempts: %v, output: %s", maxRetries, err, output)
+		}
+
+		// Calculate backoff duration
 		backoff := time.Duration(float64(initialBackoff) * math.Pow(backoffFactor, float64(attempt-1)))
 		if backoff > maxBackoff {
 			backoff = maxBackoff
 		}
 
+		// Add jitter to prevent thundering herd
+		jitter := time.Duration(rand.Int63n(int64(backoff / 2)))
+		totalBackoff := backoff + jitter
+
+		logger.WithFields(logrus.Fields{
+			"backoff_duration": totalBackoff,
+			"next_attempt":     attempt + 1,
+		}).Info("Waiting before next attempt")
+
+		// Wait for backoff duration or context cancellation
 		select {
-		case <-time.After(backoff + time.Duration(rand.Int63n(int64(backoff/2)))):
-			// Continue to the next retry attempt
+		case <-time.After(totalBackoff):
+			continue
 		case <-ctx.Done():
-			logrus.WithError(ctx.Err()).WithField("url", url).Error("Context cancelled during transcription")
+			logger.WithError(ctx.Err()).Error("Context cancelled during retry backoff")
 			return nil, ctx.Err()
 		}
 	}
 
 	if err != nil {
-		logrus.WithFields(logrus.Fields{
+		logger.WithFields(logrus.Fields{
 			"maxRetries": maxRetries,
-			"url":        url,
 			"error":      err,
 			"output":     string(output),
 		}).Error("Transcription failed after max retries")
@@ -219,16 +244,25 @@ func (s *TranscriptionService) executeTranscriptionWithRetry(ctx context.Context
 	return output, nil
 }
 
-func executeTranscriptionScript(ctx context.Context, url string) ([]byte, error) {
-	cmd := execCommand("uv", "run", "/app/scripts/transcribe.py", url, "--json")
+func executeTranscriptionScript(ctx context.Context, url string, cfg *config.Config) ([]byte, error) {
+	cmd := execCommand("uv", "run", "/app/scripts/transcribe.py",
+		url,
+		"--json",
+		"--temperature", fmt.Sprintf("%.2f", cfg.TranscriptionTemperature),
+		"--beam-size", fmt.Sprintf("%d", cfg.TranscriptionBeamSize),
+		"--best-of", fmt.Sprintf("%d", cfg.TranscriptionBestOf),
+	)
+
 	cmd.Env = append(os.Environ(),
 		"PYTHONUNBUFFERED=1",
 		"TRANSFORMERS_CACHE=/tmp",
 		"HF_HOME=/tmp",
 		"XDG_CACHE_HOME=/tmp",
-		"TORCH_HOME=/tmp")
+		"TORCH_HOME=/tmp",
+		"MALLOC_TRIM_THRESHOLD_=100000",
+		"MALLOC_MMAP_THRESHOLD_=100000",
+		"PYTHONMALLOC=malloc")
 
-	// Create a pipe for the command output
 	cmd.Dir = "/app"
 
 	output, err := cmd.CombinedOutput()

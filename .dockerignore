@@ -1,55 +1,98 @@
-# Version control
-.git
+# Version Control
+.git/
 .gitignore
 .gitattributes
+.github/
 
-# Build artifacts
+# Build and Compilation
 **/bin/
 **/obj/
 **/out/
+**/dist/
+**/build/
 **/*.exe
 **/*.dll
 **/*.so
 **/*.dylib
+**/*.o
+**/*.a
 
-# Development and IDE files
+# Development and IDE
 .idea/
 .vscode/
 *.swp
 *.swo
 *~
+.editorconfig
+.env
+.env.*
 
-# Testing
+# Python
+**/__pycache__/
+**/*.py[cod]
+**/*$py.class
+**/*.egg-info/
+**/.eggs/
+.Python
+env/
+venv/
+.env/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.pytest_cache/
+
+# Go
+go.work
+go.work.sum
+**/vendor/
+**/.go/
+
+# Testing and Documentation
 **/*_test.go
 **/test/
 **/tests/
 coverage.txt
 *.test
-
-# Documentation
 *.md
 LICENSE
 CONTRIBUTING
+docs/
 
 # Docker
-Dockerfile
-.dockerignore
+Dockerfile*
 docker-compose*.yml
+.dockerignore
 
-# Temporary files
+# Logs and Temporary
 *.log
 *.tmp
 .DS_Store
+**/*.log
+logs/
+tmp/
 
-# Python
-**/__pycache__/
-**/*.pyc
-**/*.pyo
-**/*.pyd
-.Python
-env/
-venv/
-.env
-*.egg-info/
-dist/
-build/
+# Dependencies
+node_modules/
+yarn.lock
+package-lock.json
+
+# Large files and directories
+**/*.mp3
+**/*.wav
+**/*.ogg
+**/*.mp4
+downloads/
+models/
+
+# CI/CD
+.circleci/
+.travis.yml
+.gitlab-ci.yml

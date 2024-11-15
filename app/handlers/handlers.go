@@ -31,7 +31,7 @@ var (
 func InitHandlers(config *config.Config) {
 	cfg = config
 	rateLimiter = rate.NewLimiter(rate.Every(cfg.RateLimitInterval), cfg.RateLimit)
-	service = transcription.NewTranscriptionService()
+	service = transcription.NewTranscriptionService(cfg)
 }
 
 func TranscribeHandler(w http.ResponseWriter, r *http.Request) {
