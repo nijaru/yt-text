@@ -5,51 +5,73 @@ import (
 	"net/http"
 )
 
-type Error struct {
+// AppError represents an application-specific error
+type AppError struct {
 	Code    int    `json:"-"`
 	Message string `json:"error"`
+	Op      string `json:"-"`
 	Err     error  `json:"-"`
 }
 
-func (e *Error) Error() string {
+func (e *AppError) Error() string {
 	if e.Err != nil {
 		return fmt.Sprintf("%s: %v", e.Message, e.Err)
 	}
 	return e.Message
 }
 
-func New(code int, message string, err error) *Error {
-	return &Error{
+func (e *AppError) Unwrap() error {
+	return e.Err
+}
+
+// E creates a new AppError
+func E(op string, err error, message string, code int) *AppError {
+	return &AppError{
 		Code:    code,
 		Message: message,
+		Op:      op,
 		Err:     err,
 	}
 }
 
-func IsNotFound(err error) bool {
-	if e, ok := err.(*Error); ok {
-		return e.Code == http.StatusNotFound
-	}
-	return false
+// Common error constructors
+func InvalidInput(op string, err error, message string) *AppError {
+	return E(op, err, message, http.StatusBadRequest)
 }
 
-// Common errors
-var (
-	ErrInvalidURL = func(err error) *Error {
-		return New(http.StatusBadRequest, "Invalid URL format", err)
-	}
+func NotFound(op string, err error, message string) *AppError {
+	return E(op, err, message, http.StatusNotFound)
+}
 
-	ErrDatabaseOperation = func(err error) *Error {
-		return New(http.StatusInternalServerError, "Database operation failed", err)
-	}
+func Internal(op string, err error, message string) *AppError {
+	return E(op, err, message, http.StatusInternalServerError)
+}
 
-	ErrTranscriptionFailed = func(err error) *Error {
-		return New(http.StatusInternalServerError, "Transcription process failed", err)
-	}
+func RateLimitExceeded(op string) *AppError {
+	return E(op, nil, "Rate limit exceeded", http.StatusTooManyRequests)
+}
 
-	ErrRateLimitExceeded = New(http.StatusTooManyRequests, "Rate limit exceeded", nil)
-
-	ErrInvalidRequest = func(msg string) *Error {
-		return New(http.StatusBadRequest, msg, nil)
+// Error checking functions
+func Is(err error, target *AppError) bool {
+	appErr, ok := err.(*AppError)
+	if !ok {
+		return false
 	}
-)
+	return appErr.Code == target.Code
+}
+
+func IsNotFound(err error) bool {
+	appErr, ok := err.(*AppError)
+	if !ok {
+		return false
+	}
+	return appErr.Code == http.StatusNotFound
+}
+
+func IsInvalidInput(err error) bool {
+	appErr, ok := err.(*AppError)
+	if !ok {
+		return false
+	}
+	return appErr.Code == http.StatusBadRequest
+}

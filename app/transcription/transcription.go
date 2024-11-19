@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"math/rand"
 	"os"
 	"os/exec"
 	"regexp"
@@ -13,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/aws/smithy-go/rand"
 	"github.com/nijaru/yt-text/config"
 	"github.com/nijaru/yt-text/db"
 	"github.com/nijaru/yt-text/errors"
@@ -46,7 +46,7 @@ func getTranscriptionLock(url string) *transcriptionLock {
 type TranscriptionService struct {
 	TranscriptionFunc func(ctx context.Context, url string) (string, string, error)
 	ExecuteScriptFunc func(ctx context.Context, url string, cfg *config.Config) ([]byte, error)
-	ReadFileFunc      func(filename string) (string, error)
+	ReadFileFunc      func(ctx context.Context, filename string) (string, error)
 	SummaryFunc       func(ctx context.Context, text string) (string, string, error)
 	config            *config.Config
 }
@@ -63,94 +63,115 @@ func NewTranscriptionService(cfg *config.Config) *TranscriptionService {
 }
 
 func (s *TranscriptionService) HandleTranscription(ctx context.Context, url string, cfg *config.Config) (string, string, error) {
-	logger := logrus.WithFields(logrus.Fields{
-		"url":        url,
-		"request_id": ctx.Value(middleware.RequestIDKey),
-		"model_name": cfg.ModelName,
-	})
+	const op = "transcription.HandleTranscription"
+	logger := middleware.GetLogger(ctx)
+	start := time.Now()
 
-	logger.Info("Starting transcription process")
+	logger.WithFields(logrus.Fields{
+		"url":        url,
+		"model_name": cfg.ModelName,
+	}).Info("Starting transcription process")
 
 	lock := getTranscriptionLock(url)
 	lock.mu.Lock()
 	defer lock.mu.Unlock()
 
+	var text string
+	var modelName string
+	var err error
+
+	// Check existing transcription
 	text, status, err := db.GetTranscription(ctx, url)
 	if err != nil {
-		logger.WithError(err).Error("Failed to get transcription from DB")
-		return "", "", errors.ErrDatabaseOperation(err)
+		logger.WithError(err).WithField("url", url).Error("Failed to get transcription from database")
+		return "", "", errors.Internal(op, err, "Failed to get transcription from database")
 	}
 
 	if status == "completed" {
-		modelName, err := db.GetModelName(ctx, url)
+		modelName, err = db.GetModelName(ctx, url)
 		if err != nil {
-			logger.WithError(err).Error("Failed to get model name from DB")
-			return "", "", errors.ErrDatabaseOperation(err)
+			logger.WithError(err).WithField("url", url).Error("Failed to get model name from database")
+			return "", "", errors.Internal(op, err, "Failed to get model name from database")
 		}
 
 		if modelName == cfg.ModelName {
-			logger.Info("Using existing transcription from database")
+			logger.WithFields(logrus.Fields{
+				"url":        url,
+				"model_name": modelName,
+				"duration":   time.Since(start),
+			}).Info("Using existing transcription")
 			return text, modelName, nil
 		}
 
-		logger.WithFields(logrus.Fields{
-			"current_model": cfg.ModelName,
-			"stored_model":  modelName,
-		}).Info("Model mismatch, initiating new transcription")
+		logger.WithField("url", url).Info("Model mismatch, initiating new transcription")
 	}
 
 	if err := db.SetTranscriptionStatus(ctx, url, "in_progress"); err != nil {
-		logger.WithError(err).Error("Failed to set transcription status to in_progress")
-		return "", "", errors.ErrDatabaseOperation(err)
+		logger.WithError(err).WithField("url", url).Error("Failed to set transcription status to in_progress")
+		return "", "", errors.Internal("HandleTranscription", err, "Failed to update transcription status")
 	}
 
 	if err := validation.ValidateURL(url); err != nil {
-		return "", "", errors.ErrInvalidURL(err)
+		logger.WithError(err).WithField("url", url).Warn("Invalid URL format")
+		return "", "", errors.InvalidInput("HandleTranscription", err, "Invalid URL format")
 	}
 
-	text, modelName, err := s.TranscriptionFunc(ctx, url)
+	text, modelName, err = s.TranscriptionFunc(ctx, url)
 	if err != nil {
-		db.SetTranscriptionStatus(ctx, url, "failed")
-		logger.WithError(err).Error("Transcription script failed")
-		return "", "", errors.ErrTranscriptionFailed(err)
+		if err := db.SetTranscriptionStatus(ctx, url, "failed"); err != nil {
+			logger.WithError(err).WithField("url", url).Error("Failed to set transcription status to failed")
+		}
+		logger.WithError(err).WithField("url", url).Error("Transcription script failed")
+		return "", "", errors.Internal("HandleTranscription", err, "Transcription process failed")
 	}
 
 	if err := saveTranscription(ctx, url, text, modelName); err != nil {
-		return "", "", errors.ErrDatabaseOperation(err)
+		logger.WithError(err).WithFields(logrus.Fields{
+			"url":        url,
+			"model_name": modelName,
+		}).Error("Failed to save transcription")
+		return "", "", errors.Internal("HandleTranscription", err, "Failed to save transcription")
 	}
 
-	logger.Info("Transcription saved successfully")
+	logger.WithFields(logrus.Fields{
+		"url":        url,
+		"model_name": modelName,
+		"duration":   time.Since(start),
+	}).Info("Transcription saved successfully")
 	return text, modelName, nil
 }
 
 func saveTranscription(ctx context.Context, url, text, modelName string) error {
 	if url == "" {
-		return errors.ErrInvalidRequest("URL cannot be empty")
+		return errors.InvalidInput("saveTranscription", nil, "URL cannot be empty")
 	}
 
 	if err := db.SetTranscription(ctx, url, text, modelName); err != nil {
-		return errors.ErrDatabaseOperation(err)
+		return errors.Internal("saveTranscription", err, "Failed to set transcription in database")
 	}
 
 	if err := db.SetTranscriptionStatus(ctx, url, "completed"); err != nil {
-		return errors.ErrDatabaseOperation(err)
+		return errors.Internal("saveTranscription", err, "Failed to update transcription status")
 	}
 
 	return nil
 }
 
 func (s *TranscriptionService) runTranscriptionScript(ctx context.Context, url string) (string, string, error) {
-	logrus.WithField("url", url).Info("Starting transcription")
+	const op = "transcription.runTranscriptionScript"
+	logger := middleware.GetLogger(ctx)
+
+	logger.WithField("url", url).Info("Starting transcription")
 
 	output, err := s.executeTranscriptionWithRetry(ctx, url)
 	if err != nil {
-		return "", "", err
+		return "", "", errors.Internal(op, err, "Transcription retry failed")
 	}
 
 	// Extract JSON part from the output
-	jsonPart, err := extractJSON(output)
+	jsonPart, err := extractJSON(ctx, output)
 	if err != nil {
-		return "", "", errors.ErrTranscriptionFailed(fmt.Errorf("failed to extract JSON from output: %v", err))
+		return "", "", errors.Internal("runTranscriptionScript", err, "Failed to extract JSON from output")
 	}
 
 	// Parse the JSON
@@ -159,92 +180,71 @@ func (s *TranscriptionService) runTranscriptionScript(ctx context.Context, url s
 		ModelName     string `json:"model_name"`
 	}
 	if err := json.Unmarshal([]byte(jsonPart), &response); err != nil {
-		return "", "", errors.ErrTranscriptionFailed(fmt.Errorf("failed to parse JSON: %v", err))
+		return "", "", errors.Internal("runTranscriptionScript", err, "Failed to parse JSON response")
 	}
 
-	logrus.WithField("url", url).Info("Transcription completed successfully")
+	logger.WithField("url", url).Info("Transcription completed successfully")
 	return response.Transcription, response.ModelName, nil
 }
 
-func extractJSON(output []byte) (string, error) {
+func extractJSON(ctx context.Context, output []byte) (string, error) {
+	logger := middleware.GetLogger(ctx)
 	re := regexp.MustCompile(`\{.*\}`)
 	matches := re.Find(output)
 	if matches == nil {
-		return "", errors.ErrTranscriptionFailed(fmt.Errorf("no JSON found in output"))
+		logger.Error("No JSON found in output")
+		return "", errors.Internal("extractJSON", nil, "no JSON found in output")
 	}
 	return string(matches), nil
 }
 
 func (s *TranscriptionService) executeTranscriptionWithRetry(ctx context.Context, url string) ([]byte, error) {
-	logger := logrus.WithFields(logrus.Fields{
-		"url":        url,
-		"request_id": ctx.Value(middleware.RequestIDKey),
-		"model_name": s.config.ModelName,
-	})
-
-	var (
-		output []byte
-		err    error
-	)
+	const op = "transcription.executeTranscriptionWithRetry"
+	logger := middleware.GetLogger(ctx)
+	start := time.Now()
 
 	for attempt := 1; attempt <= maxRetries; attempt++ {
-		logger = logger.WithField("attempt", attempt)
-		logger.Info("Attempting transcription")
-
-		output, err = s.ExecuteScriptFunc(ctx, url, s.config)
-		if err == nil {
-			logger.Info("Transcription attempt successful")
-			break
-		}
-
 		logger.WithFields(logrus.Fields{
-			"error":  err,
-			"output": string(output),
-		}).Warn("Transcription attempt failed")
+			"attempt": attempt,
+			"url":     url,
+		}).Debug("Attempting transcription")
+
+		output, err := s.ExecuteScriptFunc(ctx, url, s.config)
+		if err == nil {
+			logger.WithField("duration", time.Since(start)).Info("Transcription successful")
+			return output, nil
+		}
 
 		if attempt == maxRetries {
-			logger.Error("All transcription attempts failed")
-			return nil, errors.ErrTranscriptionFailed(fmt.Errorf("error transcribing after %d attempts: %v, output: %s", maxRetries, err, output))
+			return nil, errors.Internal(op, err, "Transcription failed after max retries")
 		}
 
-		// Calculate backoff duration
+		// Calculate backoff duration with jitter
 		backoff := time.Duration(float64(initialBackoff) * math.Pow(backoffFactor, float64(attempt-1)))
 		if backoff > maxBackoff {
 			backoff = maxBackoff
 		}
-
-		// Add jitter to prevent thundering herd
 		jitter := time.Duration(rand.Int63n(int64(backoff / 2)))
 		totalBackoff := backoff + jitter
 
 		logger.WithFields(logrus.Fields{
-			"backoff_duration": totalBackoff,
-			"next_attempt":     attempt + 1,
-		}).Info("Waiting before next attempt")
+			"attempt": attempt,
+			"backoff": totalBackoff,
+			"error":   err,
+		}).Warn("Transcription attempt failed, retrying")
 
-		// Wait for backoff duration or context cancellation
 		select {
 		case <-time.After(totalBackoff):
 			continue
 		case <-ctx.Done():
-			logger.WithError(ctx.Err()).Error("Context cancelled during retry backoff")
-			return nil, ctx.Err()
+			return nil, errors.Internal(op, ctx.Err(), "Context cancelled during retry")
 		}
 	}
-
-	if err != nil {
-		logger.WithFields(logrus.Fields{
-			"maxRetries": maxRetries,
-			"error":      err,
-			"output":     string(output),
-		}).Error("Transcription failed after max retries")
-		return nil, errors.ErrTranscriptionFailed(fmt.Errorf("error transcribing after %d attempts: %v, output: %s", maxRetries, err, output))
-	}
-
-	return output, nil
+	return nil, errors.Internal(op, fmt.Errorf("unexpected exit from retry loop"), "Transcription failed")
 }
 
 func executeTranscriptionScript(ctx context.Context, url string, cfg *config.Config) ([]byte, error) {
+	logger := middleware.GetLogger(ctx)
 	cmd := execCommand("uv", "run", "/app/scripts/transcribe.py",
 		url,
 		"--json",
@@ -265,76 +265,90 @@ func executeTranscriptionScript(ctx context.Context, url string, cfg *config.Con
 
 	cmd.Env = env
 	cmd.Dir = "/app"
+
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		// Check for memory-related errors in the output
-		if strings.Contains(string(output), "MemoryError") ||
-			strings.Contains(string(output), "OutOfMemoryError") {
-			return nil, errors.ErrTranscriptionFailed(fmt.Errorf("insufficient memory"))
+		// Log the error with context
+		logger.WithFields(logrus.Fields{
+			"url":    url,
+			"error":  err,
+			"output": string(output),
+		}).Error("Error executing transcription script")
+
+		// Handle memory-related errors...
+		if strings.Contains(string(output), "MemoryError") || strings.Contains(string(output), "OutOfMemoryError") {
+			return nil, errors.Internal("executeTranscriptionScript", err, "insufficient memory")
 		}
 
-		if len(output) > 0 {
-			return nil, errors.ErrTranscriptionFailed(fmt.Errorf("error executing transcription script: %v, output: %s", err, output))
-		}
-		return nil, errors.ErrTranscriptionFailed(fmt.Errorf("error executing transcription script: %v", err))
+		return nil, errors.Internal("executeTranscriptionScript", err, fmt.Sprintf("error executing transcription script: %v, output: %s", err, output))
 	}
 
+	logger.WithField("url", url).Info("Transcription script executed successfully")
 	return output, nil
 }
-func readTranscriptionFile(filename string) (string, error) {
+
+func readTranscriptionFile(ctx context.Context, filename string) (string, error) {
+	logger := middleware.GetLogger(ctx)
 	fileContent, err := os.ReadFile(filename)
 	if err != nil {
-		logrus.WithError(err).WithField("filename", filename).Error("Failed to read file")
-		return "", errors.ErrTranscriptionFailed(fmt.Errorf("error reading file: %v", err))
+		logger.WithError(err).WithField("filename", filename).Error("Failed to read file")
+		return "", errors.Internal("readTranscriptionFile", err, fmt.Sprintf("error reading file: %v", err))
 	}
 	text := string(fileContent)
 	if text == "" {
-		logrus.WithField("filename", filename).Error("Transcription resulted in empty text")
-		return "", errors.ErrTranscriptionFailed(fmt.Errorf("empty transcription text"))
+		logger.WithField("filename", filename).Error("Transcription resulted in empty text")
+		return "", errors.Internal("readTranscriptionFile", nil, "empty transcription text")
 	}
 
 	return utils.FormatText(text), nil
 }
 
-func extractFilename(output []byte) (string, error) {
+func extractFilename(ctx context.Context, output []byte) (string, error) {
+	logger := middleware.GetLogger(ctx)
 	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
 	filename := lines[len(lines)-1]
 
 	if filename == "" {
-		logrus.Error("Transcription script returned an empty filename")
-		return "", errors.ErrTranscriptionFailed(fmt.Errorf("empty filename returned"))
+		logger.Error("Transcription script returned an empty filename")
+		return "", errors.Internal("extractFilename", nil, "empty filename returned")
 	}
 
 	return filename, nil
 }
-func validateTranscriptionFile(filename string) error {
+
+func validateTranscriptionFile(ctx context.Context, filename string) error {
+	logger := middleware.GetLogger(ctx)
 	_, err := os.Stat(filename)
 	if err != nil {
 		if os.IsNotExist(err) {
-			logrus.WithField("filename", filename).Error("Transcription file does not exist")
-			return errors.ErrTranscriptionFailed(fmt.Errorf("transcription file does not exist: %s", filename))
+			logger.WithField("filename", filename).Error("Transcription file does not exist")
+			return errors.Internal("validateTranscriptionFile", err, fmt.Sprintf("transcription file does not exist: %s", filename))
 		}
-		logrus.WithError(err).WithField("filename", filename).Error("Failed to stat file")
-		return errors.ErrTranscriptionFailed(fmt.Errorf("failed to stat file: %v", err))
+		logger.WithError(err).WithField("filename", filename).Error("Failed to stat file")
+		return errors.Internal("validateTranscriptionFile", err, fmt.Sprintf("failed to stat file: %v", err))
 	}
 	return nil
 }
 
 func generateSummary(ctx context.Context, text string) (string, string, error) {
+	const op = "transcription.generateSummary"
+	logger := middleware.GetLogger(ctx)
+
 	cmd := execCommand("uv", "run", "/app/scripts/summarize.py", text)
 	cmd.Env = append(os.Environ(), "PYTHONUNBUFFERED=1")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		logrus.WithFields(logrus.Fields{
+		logger.WithFields(logrus.Fields{
 			"error":  err,
 			"output": string(output),
 		}).Error("Error executing summarization script")
-		return "", "", errors.ErrTranscriptionFailed(fmt.Errorf("error executing summarization script: %v, output: %s", err, output))
+		return "", "", errors.Internal(op, err, fmt.Sprintf("error executing summarization script: %v, output: %s", err, output))
 	}
 
-	jsonPart, err := extractFinalJSON(output)
+	jsonPart, err := extractFinalJSON(ctx, output)
 	if err != nil {
-		return "", "", errors.ErrTranscriptionFailed(fmt.Errorf("failed to extract JSON from output: %v", err))
+		logger.WithError(err).Error("Failed to extract JSON from output")
+		return "", "", errors.Internal("generateSummary", err, fmt.Sprintf("failed to extract JSON from output: %v", err))
 	}
 
 	var result struct {
@@ -348,22 +362,24 @@ func generateSummary(ctx context.Context, text string) (string, string, error) {
 			"error":  err,
 			"output": string(output),
 		}).Error("Error parsing JSON output")
-		return "", "", errors.ErrTranscriptionFailed(fmt.Errorf("error parsing JSON output: %v, output: %s", err, output))
+		return "", "", errors.Internal("generateSummary", err, fmt.Sprintf("error parsing JSON output: %v, output: %s", err, output))
 	}
 
 	if result.Error != "" {
 		logrus.WithField("error", result.Error).Error("Summarization error")
-		return "", "", errors.ErrTranscriptionFailed(fmt.Errorf("summarization error: %s", result.Error))
+		return "", "", errors.Internal("generateSummary", nil, fmt.Sprintf("summarization error: %s", result.Error))
 	}
 
 	return result.Summary, result.ModelName, nil
 }
 
-func extractFinalJSON(output []byte) (string, error) {
+func extractFinalJSON(ctx context.Context, output []byte) (string, error) {
+	logger := middleware.GetLogger(ctx)
 	re := regexp.MustCompile(`\{.*\}`)
 	matches := re.FindAll(output, -1)
 	if len(matches) == 0 {
-		return "", errors.ErrTranscriptionFailed(fmt.Errorf("no JSON found in output"))
+		logger.Error("No JSON found in output")
+		return "", errors.Internal("extractFinalJSON", nil, "no JSON found in output")
 	}
 	return string(matches[len(matches)-1]), nil
 }

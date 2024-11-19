@@ -33,28 +33,30 @@ func (e *ValidationError) Error() string {
 }
 
 func ValidateURL(rawURL string) error {
+	const op = "validation.ValidateURL"
+
 	if rawURL == "" {
-		return errors.New(http.StatusBadRequest, "URL is required", nil)
+		return errors.InvalidInput(op, nil, "URL is required")
 	}
 
 	rawURL = strings.TrimSpace(rawURL)
 	parsedURL, err := url.ParseRequestURI(rawURL)
 	if err != nil {
-		return errors.ErrInvalidURL(err)
+		return errors.InvalidInput(op, err, "Invalid URL format")
 	}
 
 	if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
-		return errors.ErrInvalidRequest("URL must start with http or https")
+		return errors.InvalidInput(op, nil, "URL must start with http or https")
 	}
 
 	if parsedURL.Host == "" {
-		return errors.ErrInvalidRequest("URL must have a host")
+		return errors.InvalidInput(op, nil, "URL must have a host")
 	}
 
 	if strings.Contains(parsedURL.Host, "youtube.com") {
 		queryParams := parsedURL.Query()
 		if _, ok := queryParams["v"]; !ok || queryParams.Get("v") == "" {
-			return errors.ErrInvalidRequest("YouTube URL must contain a valid video ID")
+			return errors.InvalidInput(op, nil, "YouTube URL must contain a valid video ID")
 		}
 	}
 
@@ -67,15 +69,17 @@ var (
 )
 
 func validateDomain(urlStr string) error {
+	const op = "validation.validateDomain"
+
 	parsedURL, err := url.Parse(urlStr)
 	if err != nil {
-		return errors.ErrInvalidURL(err)
+		return errors.InvalidInput(op, err, "Invalid URL format")
 	}
 
 	// Check if domain is blocked
 	for _, blocked := range blockedDomains {
 		if strings.Contains(parsedURL.Host, blocked) {
-			return errors.ErrInvalidRequest("Domain not allowed")
+			return errors.InvalidInput(op, nil, "Domain not allowed")
 		}
 	}
 
@@ -88,7 +92,7 @@ func validateDomain(urlStr string) error {
 		}
 	}
 	if !allowed {
-		return errors.ErrInvalidRequest("Domain not supported")
+		return errors.InvalidInput(op, nil, "Domain not supported")
 	}
 
 	return nil

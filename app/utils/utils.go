@@ -6,40 +6,57 @@ import (
 	"strings"
 
 	"github.com/nijaru/yt-text/errors"
+	"github.com/nijaru/yt-text/middleware"
 	"github.com/sirupsen/logrus"
 )
 
-func HandleError(w http.ResponseWriter, message string, statusCode int) {
-	RespondWithError(w, errors.New(statusCode, message, nil))
+func HandleError(w http.ResponseWriter, r *http.Request, message string, statusCode int) {
+	RespondWithError(w, r, errors.E("HandleError", nil, message, statusCode))
 }
 
-func RespondWithError(w http.ResponseWriter, err error) {
-	var appErr *errors.Error
-	if e, ok := err.(*errors.Error); ok {
+func RespondWithError(w http.ResponseWriter, r *http.Request, err error) {
+	logger := middleware.GetLogger(r.Context())
+	traceInfo := middleware.GetTraceInfo(r.Context())
+
+	var appErr *errors.AppError
+	if e, ok := err.(*errors.AppError); ok {
 		appErr = e
 	} else {
-		appErr = errors.New(http.StatusInternalServerError, "Internal server error", err)
+		appErr = errors.Internal("RespondWithError", err, "Internal server error")
 	}
 
-	logrus.WithFields(logrus.Fields{
+	logger.WithFields(logrus.Fields{
 		"status_code": appErr.Code,
 		"error":       appErr.Error(),
+		"request_id":  traceInfo.RequestID,
 	}).Error("Request failed")
 
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-ID", traceInfo.RequestID)
 	w.WriteHeader(appErr.Code)
-	json.NewEncoder(w).Encode(map[string]string{"error": appErr.Message})
+
+	if err := json.NewEncoder(w).Encode(map[string]string{"error": appErr.Message}); err != nil {
+		logger.WithFields(logrus.Fields{
+			"error":      err,
+			"request_id": traceInfo.RequestID,
+		}).Error("Failed to encode error response")
+	}
 }
 
-func RespondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
+func RespondWithJSON(w http.ResponseWriter, r *http.Request, code int, payload interface{}) {
+	logger := middleware.GetLogger(r.Context())
+	traceInfo := middleware.GetTraceInfo(r.Context())
+
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-ID", traceInfo.RequestID)
 	w.Header().Set("Transfer-Encoding", "chunked")
 	w.WriteHeader(code)
 
-	encoder := json.NewEncoder(w)
-	if err := encoder.Encode(payload); err != nil {
-		logrus.WithError(err).Error("Failed to encode JSON response")
-		// Can't send error response at this point since headers already sent
+	if err := json.NewEncoder(w).Encode(payload); err != nil {
+		logger.WithFields(logrus.Fields{
+			"error":      err,
+			"request_id": traceInfo.RequestID,
+		}).Error("Failed to encode JSON response")
 		return
 	}
 

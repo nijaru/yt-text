@@ -21,43 +21,43 @@ import (
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
-// IPRateLimiter handles per-IP rate limiting
-type IPRateLimiter struct {
-	ips map[string]*rate.Limiter
-	mu  sync.RWMutex
-	r   rate.Limit
-	b   int
+type ClientRateLimiter struct {
+	clients map[string]*rate.Limiter
+	mu      sync.RWMutex
+	r       rate.Limit
+	b       int
 }
 
-func NewIPRateLimiter(r rate.Limit, b int) *IPRateLimiter {
-	return &IPRateLimiter{
-		ips: make(map[string]*rate.Limiter),
-		r:   r,
-		b:   b,
+func NewClientRateLimiter(r rate.Limit, b int) *ClientRateLimiter {
+	return &ClientRateLimiter{
+		clients: make(map[string]*rate.Limiter),
+		r:       r,
+		b:       b,
 	}
 }
 
-func (i *IPRateLimiter) GetLimiter(ip string) *rate.Limiter {
-	i.mu.Lock()
-	defer i.mu.Unlock()
+func (c *ClientRateLimiter) GetLimiter(clientID string) *rate.Limiter {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
-	limiter, exists := i.ips[ip]
+	limiter, exists := c.clients[clientID]
 	if !exists {
-		limiter = rate.NewLimiter(i.r, i.b)
-		i.ips[ip] = limiter
+		limiter = rate.NewLimiter(c.r, c.b)
+		c.clients[clientID] = limiter
 	}
 
 	return limiter
 }
 
-// Middleware functions
-func ipRateLimitMiddleware(limiter *IPRateLimiter) func(http.Handler) http.Handler {
+func clientRateLimitMiddleware(limiter *ClientRateLimiter) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ip := r.RemoteAddr
-			if limiter.GetLimiter(ip).Allow() {
+			clientID := r.RemoteAddr // This can be replaced with a more sophisticated client identification method
+			logger := middleware.GetLogger(r.Context())
+			if limiter.GetLimiter(clientID).Allow() {
 				next.ServeHTTP(w, r)
 			} else {
+				logger.WithField("client_id", clientID).Warn("Rate limit exceeded")
 				http.Error(w, "Rate limit exceeded", http.StatusTooManyRequests)
 			}
 		})
@@ -66,16 +66,18 @@ func ipRateLimitMiddleware(limiter *IPRateLimiter) func(http.Handler) http.Handl
 
 func maxBytesMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		logger := middleware.GetLogger(r.Context())
 		r.Body = http.MaxBytesReader(w, r.Body, 1024*1024) // 1MB limit
+		logger.WithField("max_bytes", 1024*1024).Info("Max bytes middleware applied")
 		next.ServeHTTP(w, r)
 	})
 }
 
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*") // Replace with your domain in production
-		w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		w.Header().Set("Access-Control-Allow-Origin", "https://yt-text.com")
+		w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusOK)
@@ -100,20 +102,26 @@ func init() {
 		MaxSize:    10, // megabytes
 		MaxBackups: 3,
 		MaxAge:     28,   // days
-		Compress:   true, // disabled by default
+		Compress:   true, // enabled compression
 	}
 
 	// Create a multi-writer to write to both stdout and the log file
 	multiWriter := io.MultiWriter(os.Stdout, fileLogger)
 
 	logrus.SetOutput(multiWriter)
-	logrus.SetFormatter(&logrus.JSONFormatter{})
+	logrus.SetFormatter(&logrus.JSONFormatter{
+		TimestampFormat: time.RFC3339,
+		FieldMap: logrus.FieldMap{
+			logrus.FieldKeyTime:  "@timestamp",
+			logrus.FieldKeyLevel: "@level",
+			logrus.FieldKeyMsg:   "@message",
+		},
+	})
 	logrus.SetLevel(logrus.InfoLevel)
 
 	debug.SetGCPercent(50)                         // More aggressive garbage collection
 	debug.SetMemoryLimit(1.5 * 1024 * 1024 * 1024) // 1.5GB memory limit
 }
-
 func main() {
 	// Load and validate configuration
 	cfg := config.LoadConfig()
@@ -134,9 +142,6 @@ func main() {
 	// Initialize handlers
 	handlers.InitHandlers(cfg)
 
-	// Create IP rate limiter (5 requests per hour per IP)
-	ipLimiter := NewIPRateLimiter(rate.Every(1*time.Hour), 5)
-
 	// Set up routes
 	mux := http.NewServeMux()
 	mux.HandleFunc("/static/", serveStaticFiles)
@@ -144,11 +149,14 @@ func main() {
 	mux.HandleFunc("/transcribe", handlers.TranscribeHandler)
 	mux.HandleFunc("/health", handlers.HealthCheckHandler)
 
+	// Create client rate limiter
+	clientLimiter := NewClientRateLimiter(rate.Every(cfg.RateLimitInterval), cfg.RateLimit)
+
 	// Chain middleware in the correct order
-	handler := corsMiddleware(
-		ipRateLimitMiddleware(ipLimiter)(
-			maxBytesMiddleware(
-				middleware.LoggingMiddleware(mux),
+	handler := middleware.LoggingMiddleware(
+		clientRateLimitMiddleware(clientLimiter)(
+			corsMiddleware(
+				maxBytesMiddleware(mux),
 			),
 		),
 	)
@@ -188,7 +196,8 @@ func main() {
 }
 
 func serveIndex(w http.ResponseWriter, r *http.Request) {
-	logrus.WithFields(logrus.Fields{
+	logger := middleware.GetLogger(r.Context())
+	logger.WithFields(logrus.Fields{
 		"method": r.Method,
 		"path":   r.URL.Path,
 	}).Info("Serving index.html")

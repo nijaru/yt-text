@@ -3,8 +3,9 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
-	"sync"
+	"time"
 
 	"github.com/nijaru/yt-text/config"
 	"github.com/nijaru/yt-text/db"
@@ -35,35 +36,123 @@ func InitHandlers(config *config.Config) {
 }
 
 func TranscribeHandler(w http.ResponseWriter, r *http.Request) {
-	logger := logrus.WithFields(logrus.Fields{
-		"request_id": r.Context().Value(middleware.RequestIDKey),
-		"handler":    "TranscribeHandler",
-	})
+	logger := middleware.GetLogger(r.Context())
+	traceInfo := middleware.GetTraceInfo(r.Context())
+	start := time.Now()
+
+	logger.WithFields(logrus.Fields{
+		"method":     r.Method,
+		"path":       r.URL.Path,
+		"request_id": traceInfo.RequestID,
+	}).Info("Received transcription request")
 
 	if r.Method != http.MethodPost {
-		utils.RespondWithError(w, errors.New(http.StatusMethodNotAllowed, "Method not allowed", nil))
+		logger.WithFields(logrus.Fields{
+			"method":     r.Method,
+			"request_id": traceInfo.RequestID,
+		}).Warn("Invalid HTTP method")
+		utils.RespondWithError(w, r, errors.E("TranscribeHandler", nil, "Method not allowed", http.StatusMethodNotAllowed))
 		return
 	}
 
 	url := r.FormValue("url")
-	if err := validateAndRateLimit(url); err != nil {
-		utils.RespondWithError(w, err)
+	if err := validateAndRateLimit(r, url); err != nil {
+		logger.WithFields(logrus.Fields{
+			"url":        url,
+			"error":      err,
+			"request_id": traceInfo.RequestID,
+		}).Warn("Validation or rate limit check failed")
+		utils.RespondWithError(w, r, err)
 		return
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), cfg.TranscribeTimeout)
 	defer cancel()
 
-	text, modelName, err := service.HandleTranscription(ctx, url, cfg)
+	// Check if transcription already exists
+	dbStart := time.Now()
+	existingText, status, err := db.GetTranscription(ctx, url)
 	if err != nil {
-		logger.WithError(err).Error("Transcription failed")
-		utils.RespondWithError(w, errors.ErrTranscriptionFailed(err))
+		logger.WithFields(logrus.Fields{
+			"url":        url,
+			"error":      err,
+			"duration":   time.Since(dbStart),
+			"request_id": traceInfo.RequestID,
+		}).Error("Database error checking existing transcription")
+		utils.RespondWithError(w, r, err)
 		return
 	}
 
-	// Use chunked transfer encoding
+	// If transcription exists and is completed, return it
+	if status == "completed" && existingText != "" {
+		logger.WithFields(logrus.Fields{
+			"url":        url,
+			"status":     status,
+			"duration":   time.Since(dbStart),
+			"request_id": traceInfo.RequestID,
+		}).Info("Using existing transcription")
+
+		modelName, err := db.GetModelName(ctx, url)
+		if err != nil {
+			logger.WithFields(logrus.Fields{
+				"url":        url,
+				"error":      err,
+				"request_id": traceInfo.RequestID,
+			}).Error("Failed to get model name")
+			utils.RespondWithError(w, r, err)
+			return
+		}
+
+		if err := sendJSONResponse(w, existingText, modelName); err != nil {
+			logger.WithFields(logrus.Fields{
+				"url":        url,
+				"error":      err,
+				"request_id": traceInfo.RequestID,
+			}).Error("Failed to send JSON response")
+		}
+		return
+	}
+
+	// Generate new transcription
+	logger.WithFields(logrus.Fields{
+		"url":        url,
+		"request_id": traceInfo.RequestID,
+	}).Info("Generating new transcription")
+
+	text, modelName, err := service.HandleTranscription(ctx, url, cfg)
+	if err != nil {
+		logger.WithFields(logrus.Fields{
+			"url":        url,
+			"error":      err,
+			"request_id": traceInfo.RequestID,
+		}).Error("Transcription generation failed")
+		utils.RespondWithError(w, r, errors.Internal("TranscribeHandler", err, "Transcription failed"))
+		return
+	}
+
+	// Save new transcription
+	dbStart = time.Now()
+	if err := db.SetTranscription(ctx, url, text, modelName); err != nil {
+		logger.WithFields(logrus.Fields{
+			"url":        url,
+			"error":      err,
+			"duration":   time.Since(dbStart),
+			"request_id": traceInfo.RequestID,
+		}).Error("Failed to save transcription to database")
+		utils.RespondWithError(w, r, err)
+		return
+	}
+
+	logger.WithFields(logrus.Fields{
+		"url":        url,
+		"model_name": modelName,
+		"duration":   time.Since(start),
+		"request_id": traceInfo.RequestID,
+	}).Info("Transcription process completed successfully")
+
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Transfer-Encoding", "chunked")
+	w.Header().Set("X-Request-ID", traceInfo.RequestID)
 
 	response := struct {
 		Text      string `json:"text"`
@@ -74,7 +163,10 @@ func TranscribeHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := json.NewEncoder(w).Encode(response); err != nil {
-		logger.WithError(err).Error("Failed to encode response")
+		logger.WithFields(logrus.Fields{
+			"error":      err,
+			"request_id": traceInfo.RequestID,
+		}).Error("Failed to encode response")
 		return
 	}
 
@@ -83,131 +175,152 @@ func TranscribeHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-type IPRateLimiter struct {
-	ips map[string]*rate.Limiter
-	mu  sync.RWMutex
-	r   rate.Limit
-	b   int
-}
+func validateAndRateLimit(r *http.Request, url string) error {
+	const op = "handlers.validateAndRateLimit"
 
-func NewIPRateLimiter(r rate.Limit, b int) *IPRateLimiter {
-	return &IPRateLimiter{
-		ips: make(map[string]*rate.Limiter),
-		r:   r,
-		b:   b,
-	}
-}
-
-func (i *IPRateLimiter) GetLimiter(ip string) *rate.Limiter {
-	i.mu.Lock()
-	defer i.mu.Unlock()
-
-	limiter, exists := i.ips[ip]
-	if !exists {
-		limiter = rate.NewLimiter(i.r, i.b)
-		i.ips[ip] = limiter
-	}
-
-	return limiter
-}
-
-func validateAndRateLimit(url string) error {
 	if err := validation.ValidateURL(url); err != nil {
-		return err
+		return errors.InvalidInput(op, err, "Invalid URL format")
 	}
 
 	if !rateLimiter.Allow() {
-		return errors.ErrRateLimitExceeded
+		traceInfo := middleware.GetTraceInfo(r.Context())
+		return errors.RateLimitExceeded(fmt.Sprintf("%s: request_id=%s", op, traceInfo.RequestID))
 	}
 
 	return nil
 }
 
 func SummarizeHandler(w http.ResponseWriter, r *http.Request) {
-	logrus.WithFields(logrus.Fields{
-		"method": r.Method,
-		"path":   r.URL.Path,
-	}).Info("Received request")
+	logger := middleware.GetLogger(r.Context())
+	traceInfo := middleware.GetTraceInfo(r.Context())
+	start := time.Now()
+
+	logger.WithFields(logrus.Fields{
+		"method":     r.Method,
+		"path":       r.URL.Path,
+		"request_id": traceInfo.RequestID,
+	}).Info("Received summarize request")
 
 	if r.Method != http.MethodPost {
-		utils.RespondWithError(w, errors.New(http.StatusMethodNotAllowed, "Method not allowed", nil))
+		utils.RespondWithError(w, r, errors.E("SummarizeHandler", nil, "Method not allowed", http.StatusMethodNotAllowed))
 		return
 	}
 
 	url := r.FormValue("url")
-	logrus.WithField("url", url).Info("URL received")
-
 	if err := validation.ValidateURL(url); err != nil {
-		utils.HandleError(w, err.Error(), http.StatusBadRequest)
-		logrus.WithError(err).WithField("url", url).Error("URL validation failed")
+		logger.WithFields(logrus.Fields{
+			"url":        url,
+			"error":      err,
+			"request_id": traceInfo.RequestID,
+		}).Warn("Invalid URL format") // WARN for client error
+		utils.RespondWithError(w, r, errors.InvalidInput("SummarizeHandler", err, "Invalid URL format"))
 		return
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), cfg.TranscribeTimeout)
 	defer cancel()
 
+	// Log DB operations with timing
+	dbStart := time.Now()
 	text, status, err := db.GetTranscription(ctx, url)
 	if err != nil {
-		utils.HandleError(w, "Failed to get transcription from DB", http.StatusInternalServerError)
-		logrus.WithError(err).WithField("url", url).Error("Failed to get transcription from DB")
+		logger.WithFields(logrus.Fields{
+			"url":        url,
+			"error":      err,
+			"duration":   time.Since(dbStart),
+			"request_id": traceInfo.RequestID,
+		}).Error("Database error fetching transcription")
+		utils.RespondWithError(w, r, err)
 		return
 	}
 
-	logrus.WithField("url", url).Info("Transcription status retrieved")
+	logger.WithFields(logrus.Fields{
+		"url":        url,
+		"status":     status,
+		"duration":   time.Since(dbStart),
+		"request_id": traceInfo.RequestID,
+	}).Debug("Retrieved transcription status") // DEBUG for successful DB operation
 
 	if status != "completed" {
-		utils.HandleError(w, "Transcription not completed", http.StatusBadRequest)
-		logrus.WithField("url", url).Warn("Transcription not completed")
+		logger.WithFields(logrus.Fields{
+			"url":        url,
+			"status":     status,
+			"request_id": traceInfo.RequestID,
+		}).Info("Transcription not yet complete") // INFO for normal business state
+		utils.RespondWithError(w, r, errors.E("SummarizeHandler", nil, "Transcription not completed", http.StatusBadRequest))
 		return
 	}
 
-	// Check if summary already exists in the database
+	dbStart = time.Now()
 	summary, summaryModelName, err := db.GetSummary(ctx, url)
 	if err != nil {
-		utils.HandleError(w, "Failed to get summary from DB", http.StatusInternalServerError)
-		logrus.WithError(err).WithField("url", url).Error("Failed to get summary from DB")
+		logger.WithFields(logrus.Fields{
+			"url":        url,
+			"error":      err,
+			"duration":   time.Since(dbStart),
+			"request_id": traceInfo.RequestID,
+		}).Error("Database error fetching summary")
+		utils.RespondWithError(w, r, err)
 		return
 	}
 
-	logrus.WithField("url", url).Info("Summary status retrieved")
-
+	// Only log if we found an existing summary
 	if summary != "" && summaryModelName == cfg.SummaryModelName {
-		logrus.WithField("url", url).Info("Summary found in database")
+		logger.WithFields(logrus.Fields{
+			"url":        url,
+			"model_name": summaryModelName,
+			"duration":   time.Since(dbStart),
+			"request_id": traceInfo.RequestID,
+		}).Info("Using existing summary") // INFO for cache hit
 		if err := sendJSONResponse(w, summary, summaryModelName); err != nil {
-			logrus.WithError(err).WithField("url", url).Error("Failed to send JSON response")
+			logger.WithError(err).Error("Failed to send JSON response")
 		}
 		return
 	}
 
-	logrus.WithField("url", url).Info("Generating new summary")
+	// Generate new summary
+	logger.WithFields(logrus.Fields{
+		"url":        url,
+		"request_id": traceInfo.RequestID,
+	}).Info("Generating new summary") // INFO for significant operation
 
-	// Generate a new summary if it doesn't exist or the model name has changed
 	summary, summaryModelName, err = service.SummaryFunc(ctx, text)
 	if err != nil {
-		utils.HandleError(w, "Failed to generate summary", http.StatusInternalServerError)
-		logrus.WithError(err).WithField("url", url).Error("Failed to generate summary")
+		logger.WithFields(logrus.Fields{
+			"url":        url,
+			"error":      err,
+			"request_id": traceInfo.RequestID,
+		}).Error("Failed to generate summary")
+		utils.RespondWithError(w, r, err)
 		return
 	}
 
-	if ctx.Err() != nil {
-		utils.HandleError(w, "Request timed out", http.StatusGatewayTimeout)
-		logrus.WithError(ctx.Err()).WithField("url", url).Error("Context cancelled before sending response")
-		return
-	}
-
-	logrus.WithField("url", url).Info("Saving summary to database")
-
-	// Save the summary and summary model name in the database
+	// Save new summary
+	dbStart = time.Now()
 	if err := db.SetSummary(ctx, url, summary, summaryModelName); err != nil {
-		utils.HandleError(w, "Failed to save summary to DB", http.StatusInternalServerError)
-		logrus.WithError(err).WithField("url", url).Error("Failed to save summary to DB")
+		logger.WithFields(logrus.Fields{
+			"url":        url,
+			"error":      err,
+			"duration":   time.Since(dbStart),
+			"request_id": traceInfo.RequestID,
+		}).Error("Failed to save summary to database")
+		utils.RespondWithError(w, r, err)
 		return
 	}
+
+	logger.WithFields(logrus.Fields{
+		"url":        url,
+		"model_name": summaryModelName,
+		"duration":   time.Since(start),
+		"request_id": traceInfo.RequestID,
+	}).Info("Summary process completed successfully") // INFO for overall success
 
 	if err := sendJSONResponse(w, summary, summaryModelName); err != nil {
-		logrus.WithError(err).WithField("url", url).Error("Failed to send JSON response")
+		logger.WithFields(logrus.Fields{
+			"error":      err,
+			"request_id": traceInfo.RequestID,
+		}).Error("Failed to send JSON response")
 	}
-	logrus.WithField("url", url).Info("Summary generation successful")
 }
 
 func sendJSONResponse(w http.ResponseWriter, text, modelName string) error {
@@ -219,29 +332,51 @@ func sendJSONResponse(w http.ResponseWriter, text, modelName string) error {
 		Text:      text,
 		ModelName: modelName,
 	}
-	err := json.NewEncoder(w).Encode(response)
-	if err != nil {
-		logrus.WithError(err).Error("Failed to encode JSON response")
-		http.Error(w, "Failed to encode JSON response", http.StatusInternalServerError)
-		return err
-	}
-	logrus.Info("JSON response sent successfully")
-	return nil
+	return json.NewEncoder(w).Encode(response)
 }
 
 func HealthCheckHandler(w http.ResponseWriter, r *http.Request) {
+	logger := middleware.GetLogger(r.Context())
+	traceInfo := middleware.GetTraceInfo(r.Context())
+	start := time.Now()
+
+	logger.WithFields(logrus.Fields{
+		"method":     r.Method,
+		"path":       r.URL.Path,
+		"request_id": traceInfo.RequestID,
+	}).Debug("Health check requested") // DEBUG since health checks are high-volume
+
 	if r.Method != http.MethodGet {
-		utils.RespondWithError(w, errors.New(http.StatusMethodNotAllowed, "Method not allowed", nil))
+		logger.WithFields(logrus.Fields{
+			"method":     r.Method,
+			"request_id": traceInfo.RequestID,
+		}).Warn("Invalid HTTP method for health check")
+		utils.RespondWithError(w, r, errors.E("HealthCheckHandler", nil, "Method not allowed", http.StatusMethodNotAllowed))
 		return
 	}
 
 	response := struct {
-		Status string `json:"status"`
+		Status   string        `json:"status"`
+		Duration time.Duration `json:"duration"`
 	}{
-		Status: "ok",
+		Status:   "ok",
+		Duration: time.Since(start),
 	}
 
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-ID", traceInfo.RequestID)
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(response)
+
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		logger.WithFields(logrus.Fields{
+			"error":      err,
+			"request_id": traceInfo.RequestID,
+		}).Error("Failed to encode health check response")
+		return
+	}
+
+	logger.WithFields(logrus.Fields{
+		"duration":   time.Since(start),
+		"request_id": traceInfo.RequestID,
+	}).Debug("Health check completed")
 }
