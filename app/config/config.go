@@ -1,112 +1,321 @@
 package config
 
 import (
+	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/pkg/errors"
-
-	"github.com/sirupsen/logrus"
 )
 
 type Config struct {
-	DBPath            string
-	ServerPort        string
-	ReadTimeout       time.Duration
-	WriteTimeout      time.Duration
-	IdleTimeout       time.Duration
-	TranscribeTimeout time.Duration
-	RateLimit         int
-	RateLimitInterval time.Duration
-	ModelName         string
-	SummaryModelName  string
+	// Server settings
+	ServerPort      string        `json:"server_port"`
+	ReadTimeout     time.Duration `json:"read_timeout"`
+	WriteTimeout    time.Duration `json:"write_timeout"`
+	IdleTimeout     time.Duration `json:"idle_timeout"`
+	RequestTimeout  time.Duration `json:"request_timeout"`
+	ShutdownTimeout time.Duration `json:"shutdown_timeout"`
+	Debug           bool          `json:"debug"`
+	Version         string        `json:"version"`
 
-	// Spaces Configuration
-	SpacesEnabled  bool
-	SpacesKey      string
-	SpacesSecret   string
-	SpacesRegion   string
-	SpacesEndpoint string
-	SpacesBucket   string
+	// Application paths
+	LogDir      string `json:"log_dir"`
+	TempDir     string `json:"temp_dir"`
+	DownloadDir string `json:"download_dir"`
 
-	// Transcription Settings
-	TranscriptionTemperature float64
-	TranscriptionBeamSize    int
-	TranscriptionBestOf      int
+	// Logging
+	LogLevel string `json:"log_level"`
+	LogFile  string `json:"log_file"`
 
-	// Whisper Configuration
-	WhisperDownloadRoot string
-	CudaVisibleDevices  string
-	ModelsDir           string
-	CacheDir            string
-	TempDir             string
+	// CORS Configuration
+	CORS CORSConfig `json:"cors"`
 
-	// Resource Management
-	MemoryLimit         int64
-	GCPercent           int
-	MallocTrimThreshold int
-	MallocArenaMax      int
+	// Rate Limiting
+	RateLimit RateLimitConfig `json:"rate_limit"`
+
+	// Monitoring
+	Monitoring MonitoringConfig `json:"monitoring"`
+
+	// Database settings
+	Database DatabaseConfig `json:"database"`
+
+	// Service configurations
+	Video   VideoConfig   `json:"video"`
+	Summary SummaryConfig `json:"summary"`
+	Scripts ScriptsConfig `json:"scripts"`
 }
 
-func LoadConfig() *Config {
-	return &Config{
-		DBPath:            GetEnv("DB_PATH", "/tmp/urls.db"),
-		ServerPort:        GetEnv("SERVER_PORT", "8080"),
-		ReadTimeout:       getEnvAsDuration("READ_TIMEOUT", 120*time.Second),
-		WriteTimeout:      getEnvAsDuration("WRITE_TIMEOUT", 300*time.Second),
-		IdleTimeout:       getEnvAsDuration("IDLE_TIMEOUT", 120*time.Second),
-		TranscribeTimeout: getEnvAsDuration("TRANSCRIBE_TIMEOUT", 30*time.Minute),
-		RateLimit:         getEnvAsInt("RATE_LIMIT", 5),
-		RateLimitInterval: getEnvAsDuration("RATE_LIMIT_INTERVAL", 5*time.Second),
-		ModelName:         GetEnv("MODEL_NAME", "tiny.en"),
-		SummaryModelName:  GetEnv("SUMMARY_MODEL_NAME", "facebook/bart-large-cnn"),
+type CORSConfig struct {
+	Enabled          bool     `json:"enabled"`
+	AllowedOrigins   []string `json:"allowed_origins"`
+	AllowedMethods   []string `json:"allowed_methods"`
+	AllowedHeaders   []string `json:"allowed_headers"`
+	ExposedHeaders   []string `json:"exposed_headers"`
+	AllowCredentials bool     `json:"allow_credentials"`
+	MaxAge           int      `json:"max_age"`
+}
 
-		// Spaces Configuration
-		SpacesEnabled:  getEnvAsBool("SPACES_ENABLED", false),
-		SpacesKey:      GetEnv("SPACES_KEY", ""),
-		SpacesSecret:   GetEnv("SPACES_SECRET", ""),
-		SpacesRegion:   GetEnv("SPACES_REGION", "nyc3"),
-		SpacesEndpoint: GetEnv("SPACES_ENDPOINT", "https://nyc3.digitaloceanspaces.com"),
-		SpacesBucket:   GetEnv("SPACES_BUCKET", "yt-text"),
+type RateLimitConfig struct {
+	Enabled           bool `json:"enabled"`
+	RequestsPerMinute int  `json:"requests_per_minute"`
+	BurstSize         int  `json:"burst_size"`
+}
 
-		// Transcription Settings with reasonable defaults
-		TranscriptionTemperature: getEnvAsFloat("TRANSCRIPTION_TEMPERATURE", 0.2),
-		TranscriptionBeamSize:    getEnvAsInt("TRANSCRIPTION_BEAM_SIZE", 2),
-		TranscriptionBestOf:      getEnvAsInt("TRANSCRIPTION_BEST_OF", 1),
+type MonitoringConfig struct {
+	MetricsEnabled bool   `json:"metrics_enabled"`
+	MetricsPath    string `json:"metrics_path"`
+	TracingEnabled bool   `json:"tracing_enabled"`
+	TracingType    string `json:"tracing_type"` // e.g., "jaeger", "datadog"
+}
 
-		// Whisper Configuration
-		WhisperDownloadRoot: GetEnv("WHISPER_DOWNLOAD_ROOT", "/tmp/models"),
-		CudaVisibleDevices:  GetEnv("CUDA_VISIBLE_DEVICES", ""),
-		ModelsDir:           GetEnv("MODELS_DIR", "/tmp/models"),
-		CacheDir:            GetEnv("CACHE_DIR", "/tmp/cache"),
-		TempDir:             GetEnv("TEMP_DIR", "/tmp"),
+type DatabaseConfig struct {
+	Path               string        `json:"path"`
+	MaxConnections     int           `json:"max_connections"`
+	MaxIdleConnections int           `json:"max_idle_connections"`
+	ConnMaxLifetime    time.Duration `json:"conn_max_lifetime"`
+}
 
-		// Resource Management
-		MemoryLimit:         getEnvAsInt64("MEMORY_LIMIT", 1536*1024*1024), // 1.5GB default
-		GCPercent:           getEnvAsInt("GOGC", 10),
-		MallocTrimThreshold: getEnvAsInt("MALLOC_TRIM_THRESHOLD_", 100000),
-		MallocArenaMax:      getEnvAsInt("MALLOC_ARENA_MAX", 1),
+type VideoConfig struct {
+	MaxConcurrentJobs int           `json:"max_concurrent_jobs"`
+	ProcessTimeout    time.Duration `json:"process_timeout"`
+	CleanupInterval   time.Duration `json:"cleanup_interval"`
+	MaxRetries        int           `json:"max_retries"`
+	RetryDelay        time.Duration `json:"retry_delay"`
+	MaxDuration       time.Duration `json:"max_duration"`
+	MaxFileSize       int64         `json:"max_file_size"`
+	AllowedFormats    []string      `json:"allowed_formats"`
+}
+
+type SummaryConfig struct {
+	ModelName string `json:"model_name"`
+	MaxLength int    `json:"max_length"`
+	MinLength int    `json:"min_length"`
+	BatchSize int    `json:"batch_size"`
+	ChunkSize int    `json:"chunk_size"`
+}
+
+type ScriptsConfig struct {
+	PythonPath  string        `json:"python_path"`
+	ScriptsPath string        `json:"scripts_path"`
+	Timeout     time.Duration `json:"timeout"`
+	MaxRetries  int           `json:"max_retries"`
+	Environment []string      `json:"environment"`
+	Models      ModelsConfig  `json:"models"`
+}
+
+type ModelsConfig struct {
+	TranscriptionModel string `json:"transcription_model"`
+	SummaryModel       string `json:"summary_model"`
+	ModelPath          string `json:"model_path"`
+	CacheDir           string `json:"cache_dir"`
+}
+
+// Load reads configuration from environment variables
+func Load() (*Config, error) {
+	cfg := &Config{
+		// Server settings
+		ServerPort:      getEnv("SERVER_PORT", "8080"),
+		ReadTimeout:     getEnvAsDuration("READ_TIMEOUT", 15*time.Second),
+		WriteTimeout:    getEnvAsDuration("WRITE_TIMEOUT", 15*time.Second),
+		IdleTimeout:     getEnvAsDuration("IDLE_TIMEOUT", 60*time.Second),
+		RequestTimeout:  getEnvAsDuration("REQUEST_TIMEOUT", 30*time.Second),
+		ShutdownTimeout: getEnvAsDuration("SHUTDOWN_TIMEOUT", 30*time.Second),
+		Debug:           getEnvAsBool("DEBUG", false),
+		Version:         getEnv("VERSION", "1.0.0"),
+
+		// Application paths
+		LogDir:      getEnv("LOG_DIR", "/var/log/yt-text"),
+		TempDir:     getEnv("TEMP_DIR", "/tmp/yt-text"),
+		DownloadDir: getEnv("DOWNLOAD_DIR", "/tmp/yt-text/downloads"),
+
+		// Logging
+		LogLevel: getEnv("LOG_LEVEL", "info"),
+		LogFile:  getEnv("LOG_FILE", ""),
+
+		// CORS Configuration
+		CORS: CORSConfig{
+			Enabled:          getEnvAsBool("CORS_ENABLED", true),
+			AllowedOrigins:   getEnvAsStringSlice("CORS_ALLOWED_ORIGINS", []string{"*"}),
+			AllowedMethods:   getEnvAsStringSlice("CORS_ALLOWED_METHODS", []string{"GET", "POST", "OPTIONS"}),
+			AllowedHeaders:   getEnvAsStringSlice("CORS_ALLOWED_HEADERS", []string{"Content-Type", "Authorization"}),
+			ExposedHeaders:   getEnvAsStringSlice("CORS_EXPOSED_HEADERS", []string{"X-Request-ID"}),
+			AllowCredentials: getEnvAsBool("CORS_ALLOW_CREDENTIALS", false),
+			MaxAge:           getEnvAsInt("CORS_MAX_AGE", 86400),
+		},
+
+		// Rate Limiting
+		RateLimit: RateLimitConfig{
+			Enabled:           getEnvAsBool("RATE_LIMIT_ENABLED", true),
+			RequestsPerMinute: getEnvAsInt("RATE_LIMIT_RPM", 60),
+			BurstSize:         getEnvAsInt("RATE_LIMIT_BURST", 10),
+		},
+
+		// Monitoring
+		Monitoring: MonitoringConfig{
+			MetricsEnabled: getEnvAsBool("METRICS_ENABLED", true),
+			MetricsPath:    getEnv("METRICS_PATH", "/metrics"),
+			TracingEnabled: getEnvAsBool("TRACING_ENABLED", false),
+			TracingType:    getEnv("TRACING_TYPE", "jaeger"),
+		},
+
+		// Database
+		Database: DatabaseConfig{
+			Path:               getEnv("DB_PATH", "/var/lib/yt-text/data.db"),
+			MaxConnections:     getEnvAsInt("DB_MAX_CONNECTIONS", 10),
+			MaxIdleConnections: getEnvAsInt("DB_MAX_IDLE_CONNS", 5),
+			ConnMaxLifetime:    getEnvAsDuration("DB_CONN_MAX_LIFETIME", time.Hour),
+		},
+
+		// Video Service
+		Video: VideoConfig{
+			MaxConcurrentJobs: getEnvAsInt("VIDEO_MAX_CONCURRENT_JOBS", 5),
+			ProcessTimeout:    getEnvAsDuration("VIDEO_PROCESS_TIMEOUT", 30*time.Minute),
+			CleanupInterval:   getEnvAsDuration("VIDEO_CLEANUP_INTERVAL", 15*time.Minute),
+			MaxRetries:        getEnvAsInt("VIDEO_MAX_RETRIES", 3),
+			RetryDelay:        getEnvAsDuration("VIDEO_RETRY_DELAY", 5*time.Second),
+			MaxDuration:       getEnvAsDuration("VIDEO_MAX_DURATION", 4*time.Hour),
+			MaxFileSize:       getEnvAsInt64("VIDEO_MAX_FILE_SIZE", 100*1024*1024), // 100MB
+			AllowedFormats:    getEnvAsStringSlice("VIDEO_ALLOWED_FORMATS", []string{"mp4", "webm"}),
+		},
+
+		// Summary Service
+		Summary: SummaryConfig{
+			ModelName: getEnv("SUMMARY_MODEL", "facebook/bart-large-cnn"),
+			MaxLength: getEnvAsInt("SUMMARY_MAX_LENGTH", 150),
+			MinLength: getEnvAsInt("SUMMARY_MIN_LENGTH", 30),
+			BatchSize: getEnvAsInt("SUMMARY_BATCH_SIZE", 512),
+			ChunkSize: getEnvAsInt("SUMMARY_CHUNK_SIZE", 1000),
+		},
+
+		// Scripts
+		Scripts: ScriptsConfig{
+			PythonPath:  getEnv("PYTHON_PATH", "python3"),
+			ScriptsPath: getEnv("SCRIPTS_PATH", "./scripts"),
+			Timeout:     getEnvAsDuration("SCRIPTS_TIMEOUT", 5*time.Minute),
+			MaxRetries:  getEnvAsInt("SCRIPTS_MAX_RETRIES", 3),
+			Environment: getEnvAsStringSlice("PYTHON_ENV", []string{
+				"PYTHONUNBUFFERED=1",
+				"PYTHONDONTWRITEBYTECODE=1",
+			}),
+			Models: ModelsConfig{
+				TranscriptionModel: getEnv("TRANSCRIPTION_MODEL", "base.en"),
+				SummaryModel:       getEnv("SUMMARY_MODEL", "facebook/bart-large-cnn"),
+				ModelPath:          getEnv("MODEL_PATH", "/opt/models"),
+				CacheDir:           getEnv("MODEL_CACHE_DIR", "/tmp/model-cache"),
+			},
+		},
 	}
+
+	// Validate configuration
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+
+	return cfg, nil
 }
 
-func GetEnv(key, defaultValue string) string {
+func (c *Config) Validate() error {
+	// Validate paths
+	if err := validatePaths(c); err != nil {
+		return err
+	}
+
+	// Validate timeouts
+	if err := validateTimeouts(c); err != nil {
+		return err
+	}
+
+	// Validate service configurations
+	if err := validateServices(c); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func validatePaths(c *Config) error {
+	paths := []struct {
+		path string
+		name string
+	}{
+		{c.LogDir, "log directory"},
+		{c.TempDir, "temp directory"},
+		{c.DownloadDir, "download directory"},
+		{c.Scripts.Models.ModelPath, "model path"},
+		{c.Scripts.Models.CacheDir, "model cache directory"},
+		{filepath.Dir(c.Database.Path), "database directory"},
+	}
+
+	for _, p := range paths {
+		if err := os.MkdirAll(p.path, 0755); err != nil {
+			return fmt.Errorf("failed to create %s: %w", p.name, err)
+		}
+	}
+
+	return nil
+}
+
+func validateTimeouts(c *Config) error {
+	if c.ReadTimeout <= 0 {
+		return errors.New("read timeout must be positive")
+	}
+	if c.WriteTimeout <= 0 {
+		return errors.New("write timeout must be positive")
+	}
+	if c.ShutdownTimeout <= 0 {
+		return errors.New("shutdown timeout must be positive")
+	}
+	return nil
+}
+
+func validateServices(c *Config) error {
+	if c.Video.MaxConcurrentJobs <= 0 {
+		return errors.New("max concurrent jobs must be positive")
+	}
+	if c.Video.MaxDuration <= 0 {
+		return errors.New("max video duration must be positive")
+	}
+	if c.Video.MaxFileSize <= 0 {
+		return errors.New("max file size must be positive")
+	}
+	return nil
+}
+
+// Helper functions for reading environment variables
+func getEnv(key, defaultValue string) string {
 	if value, exists := os.LookupEnv(key); exists {
 		return value
 	}
 	return defaultValue
 }
 
+func getEnvAsInt(key string, defaultValue int) int {
+	if value, exists := os.LookupEnv(key); exists {
+		if intVal, err := strconv.Atoi(value); err == nil {
+			return intVal
+		}
+	}
+	return defaultValue
+}
+
+func getEnvAsInt64(key string, defaultValue int64) int64 {
+	if value, exists := os.LookupEnv(key); exists {
+		if intVal, err := strconv.ParseInt(value, 10, 64); err == nil {
+			return intVal
+		}
+	}
+	return defaultValue
+}
+
 func getEnvAsBool(key string, defaultValue bool) bool {
 	if value, exists := os.LookupEnv(key); exists {
-		if boolValue, err := strconv.ParseBool(value); err == nil {
-			return boolValue
+		if boolVal, err := strconv.ParseBool(value); err == nil {
+			return boolVal
 		}
-		logrus.WithFields(logrus.Fields{
-			"key":          key,
-			"value":        value,
-			"defaultValue": defaultValue,
-		}).Warn("Invalid boolean, using default")
 	}
 	return defaultValue
 }
@@ -116,123 +325,15 @@ func getEnvAsDuration(key string, defaultValue time.Duration) time.Duration {
 		if duration, err := time.ParseDuration(value); err == nil {
 			return duration
 		}
-		logrus.WithFields(logrus.Fields{
-			"key":          key,
-			"value":        value,
-			"defaultValue": defaultValue,
-		}).Warn("Invalid duration, using default")
 	}
 	return defaultValue
 }
 
-func getEnvAsInt(key string, defaultValue int) int {
+func getEnvAsStringSlice(key string, defaultValue []string) []string {
 	if value, exists := os.LookupEnv(key); exists {
-		if intValue, err := strconv.Atoi(value); err == nil {
-			return intValue
+		if value = strings.TrimSpace(value); value != "" {
+			return strings.Split(value, ",")
 		}
-		logrus.WithFields(logrus.Fields{
-			"key":          key,
-			"value":        value,
-			"defaultValue": defaultValue,
-		}).Warn("Invalid integer, using default")
 	}
 	return defaultValue
-}
-
-func getEnvAsInt64(key string, defaultValue int64) int64 {
-	if value, exists := os.LookupEnv(key); exists {
-		if intValue, err := strconv.ParseInt(value, 10, 64); err == nil {
-			return intValue
-		}
-		logrus.WithFields(logrus.Fields{
-			"key":          key,
-			"value":        value,
-			"defaultValue": defaultValue,
-		}).Warn("Invalid int64, using default")
-	}
-	return defaultValue
-}
-
-func getEnvAsFloat(key string, defaultValue float64) float64 {
-	if value, exists := os.LookupEnv(key); exists {
-		if floatValue, err := strconv.ParseFloat(value, 64); err == nil {
-			return floatValue
-		}
-		logrus.WithFields(logrus.Fields{
-			"key":          key,
-			"value":        value,
-			"defaultValue": defaultValue,
-		}).Warn("Invalid float, using default")
-	}
-	return defaultValue
-}
-
-func (c *Config) GetTranscriptionEnv() []string {
-	return []string{
-		"PYTHONUNBUFFERED=1",
-		"PYTHONDONTWRITEBYTECODE=1",
-		"PYTHONPATH=/app",
-		"MALLOC_TRIM_THRESHOLD_=" + strconv.Itoa(c.MallocTrimThreshold),
-		"MALLOC_ARENA_MAX=" + strconv.Itoa(c.MallocArenaMax),
-		"PYTHONMALLOC=malloc",
-		"WHISPER_DOWNLOAD_ROOT=" + c.WhisperDownloadRoot,
-		"MODELS_DIR=" + c.ModelsDir,
-		"CACHE_DIR=" + c.CacheDir,
-		"TEMP_DIR=" + c.TempDir,
-		"CUDA_VISIBLE_DEVICES=" + c.CudaVisibleDevices,
-	}
-}
-
-func ValidateConfig(cfg *Config) error {
-	if cfg.ServerPort == "" {
-		return errors.New("server port is required")
-	}
-	if cfg.DBPath == "" {
-		return errors.New("database path is required")
-	}
-	if cfg.RateLimit <= 0 {
-		return errors.New("rate limit must be greater than 0")
-	}
-	if cfg.RateLimitInterval <= 0 {
-		return errors.New("rate limit interval must be greater than 0")
-	}
-	if cfg.ModelName == "" {
-		return errors.New("model name is required")
-	}
-	if cfg.TranscribeTimeout <= 0 {
-		return errors.New("transcribe timeout must be greater than 0")
-	}
-	if cfg.ReadTimeout <= 0 {
-		return errors.New("read timeout must be greater than 0")
-	}
-	if cfg.WriteTimeout <= 0 {
-		return errors.New("write timeout must be greater than 0")
-	}
-	if cfg.IdleTimeout <= 0 {
-		return errors.New("idle timeout must be greater than 0")
-	}
-
-	// Validate Whisper configuration
-	if cfg.WhisperDownloadRoot == "" {
-		return errors.New("whisper download root is required")
-	}
-	if cfg.ModelsDir == "" {
-		return errors.New("models directory is required")
-	}
-	if cfg.CacheDir == "" {
-		return errors.New("cache directory is required")
-	}
-	if cfg.TempDir == "" {
-		return errors.New("temp directory is required")
-	}
-
-	// Validate resource limits
-	if cfg.MemoryLimit <= 0 {
-		return errors.New("memory limit must be greater than 0")
-	}
-	if cfg.MallocTrimThreshold <= 0 {
-		return errors.New("malloc trim threshold must be greater than 0")
-	}
-
-	return nil
 }

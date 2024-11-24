@@ -1,98 +1,134 @@
 package validation
 
 import (
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
-	"time"
 
+	"github.com/nijaru/yt-text/config"
 	"github.com/nijaru/yt-text/errors"
 )
 
-var httpClient = &http.Client{
-	Timeout: 10 * time.Second,
-	CheckRedirect: func(req *http.Request, via []*http.Request) error {
-		// Allow up to 10 redirects
-		if len(via) >= 10 {
-			return http.ErrUseLastResponse
-		}
-		return nil
-	},
+type Validator struct {
+	config *config.Config
 }
 
-func SetHTTPClient(client *http.Client) {
-	httpClient = client
+func NewValidator(cfg *config.Config) *Validator {
+	return &Validator{
+		config: cfg,
+	}
 }
 
-type ValidationError struct {
-	Message string
-}
+// BasicURLValidation performs quick validation without network calls
+func (v *Validator) BasicURLValidation(urlStr string) error {
+	const op = "Validator.BasicURLValidation"
 
-func (e *ValidationError) Error() string {
-	return e.Message
-}
-
-func ValidateURL(rawURL string) error {
-	const op = "validation.ValidateURL"
-
-	if rawURL == "" {
+	if urlStr == "" {
 		return errors.InvalidInput(op, nil, "URL is required")
 	}
-
-	rawURL = strings.TrimSpace(rawURL)
-	parsedURL, err := url.ParseRequestURI(rawURL)
-	if err != nil {
-		return errors.InvalidInput(op, err, "Invalid URL format")
-	}
-
-	if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
-		return errors.InvalidInput(op, nil, "URL must start with http or https")
-	}
-
-	if parsedURL.Host == "" {
-		return errors.InvalidInput(op, nil, "URL must have a host")
-	}
-
-	if strings.Contains(parsedURL.Host, "youtube.com") {
-		queryParams := parsedURL.Query()
-		if _, ok := queryParams["v"]; !ok || queryParams.Get("v") == "" {
-			return errors.InvalidInput(op, nil, "YouTube URL must contain a valid video ID")
-		}
-	}
-
-	return nil
-}
-
-var (
-	allowedDomains = []string{"youtube.com", "youtu.be"}
-	blockedDomains = []string{"example.com", "malicious.com"}
-)
-
-func validateDomain(urlStr string) error {
-	const op = "validation.validateDomain"
 
 	parsedURL, err := url.Parse(urlStr)
 	if err != nil {
 		return errors.InvalidInput(op, err, "Invalid URL format")
 	}
 
-	// Check if domain is blocked
-	for _, blocked := range blockedDomains {
-		if strings.Contains(parsedURL.Host, blocked) {
-			return errors.InvalidInput(op, nil, "Domain not allowed")
+	// Protocol validation
+	if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
+		return errors.InvalidInput(op, nil, "URL must use HTTP or HTTPS")
+	}
+
+	// Domain validation
+	host := parsedURL.Hostname()
+	if !strings.Contains(host, "youtube.com") && !strings.Contains(host, "youtu.be") {
+		return errors.InvalidInput(op, nil, "Only YouTube URLs are supported")
+	}
+
+	// Video ID validation
+	if strings.Contains(host, "youtube.com") {
+		if v := parsedURL.Query().Get("v"); v == "" {
+			return errors.InvalidInput(op, nil, "Missing video ID in YouTube URL")
+		}
+	} else if strings.Contains(host, "youtu.be") {
+		if path := strings.TrimPrefix(parsedURL.Path, "/"); path == "" {
+			return errors.InvalidInput(op, nil, "Missing video ID in YouTube URL")
 		}
 	}
 
-	// Check if domain is allowed
-	allowed := false
-	for _, domain := range allowedDomains {
-		if strings.Contains(parsedURL.Host, domain) {
-			allowed = true
-			break
+	return nil
+}
+
+// Request validation
+func (v *Validator) ValidateRequest(r *http.Request, opts RequestValidationOpts) error {
+	const op = "Validator.ValidateRequest"
+
+	// Method validation
+	if len(opts.AllowedMethods) > 0 {
+		methodAllowed := false
+		for _, method := range opts.AllowedMethods {
+			if r.Method == method {
+				methodAllowed = true
+				break
+			}
+		}
+		if !methodAllowed {
+			return errors.InvalidInput(op, nil, fmt.Sprintf("Method %s not allowed", r.Method))
 		}
 	}
-	if !allowed {
-		return errors.InvalidInput(op, nil, "Domain not supported")
+
+	// Content type validation
+	if opts.RequireJSON && (r.Method == http.MethodPost || r.Method == http.MethodPut) {
+		if err := v.ValidateContentType(r, "application/json"); err != nil {
+			return err
+		}
+	}
+
+	// Content length validation
+	if opts.MaxContentLength > 0 {
+		if r.ContentLength > opts.MaxContentLength {
+			return errors.InvalidInput(op, nil, "Request body too large")
+		}
+		r.Body = http.MaxBytesReader(nil, r.Body, opts.MaxContentLength)
+	}
+
+	return nil
+}
+
+type RequestValidationOpts struct {
+	MaxContentLength int64
+	AllowedMethods   []string
+	RequireJSON      bool
+}
+
+// VideoMetadata validation
+func (v *Validator) ValidateVideoMetadata(duration float64, fileSize int64) error {
+	const op = "Validator.ValidateVideoMetadata"
+
+	if duration > v.config.Video.MaxDuration.Seconds() {
+		return errors.InvalidInput(op, nil, fmt.Sprintf(
+			"Video duration (%.1f seconds) exceeds maximum allowed (%v seconds)",
+			duration,
+			v.config.Video.MaxDuration.Seconds(),
+		))
+	}
+
+	if fileSize > v.config.Video.MaxFileSize {
+		return errors.InvalidInput(op, nil, fmt.Sprintf(
+			"Video file size (%d bytes) exceeds maximum allowed (%d bytes)",
+			fileSize,
+			v.config.Video.MaxFileSize,
+		))
+	}
+
+	return nil
+}
+
+func (v *Validator) ValidateContentType(r *http.Request, expectedType string) error {
+	const op = "Validator.ValidateContentType"
+
+	contentType := r.Header.Get("Content-Type")
+	if !strings.Contains(contentType, expectedType) {
+		return errors.InvalidInput(op, nil, fmt.Sprintf("Content-Type must be %s", expectedType))
 	}
 
 	return nil
