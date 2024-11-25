@@ -6,56 +6,34 @@ import traceback
 
 import yt_dlp
 
+MAX_VIDEO_DURATION = 4 * 3600  # 4 hours in seconds
 
-def validate_url(url):
+
+def validate_url(url: str) -> dict:
     result = {"valid": False, "duration": 0, "file_size": 0, "format": "", "error": ""}
 
     try:
-        # Print debug info to stderr
-        print(f"Validating URL: {url}", file=sys.stderr)
-
-        if not url.startswith(("http://", "https://")):
-            result["error"] = "URL must start with http:// or https://"
-            return result
-
-        ydl_opts = {
-            "quiet": True,
-            "no_warnings": True,
-            "extract_flat": True,  # Only extract metadata
-        }
-
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            print("Extracting video info...", file=sys.stderr)
+        with yt_dlp.YoutubeDL({"quiet": True}) as ydl:
             info = ydl.extract_info(url, download=False)
 
-            # Remove the noisy info dump
-            # print(f"Extracted info: {json.dumps(info, indent=2)}", file=sys.stderr)
-
-            if info is None:
-                result["error"] = "Failed to extract information from the URL"
+            duration = info.get("duration", 0)
+            if duration > MAX_VIDEO_DURATION:
+                result["error"] = (
+                    f"Video too long: {duration} seconds (max: {MAX_VIDEO_DURATION})"
+                )
                 return result
 
-            # Check if the URL points to a single video
-            if info.get("_type") and info["_type"] != "video":
-                result["error"] = "URL must be for a single video"
-                return result
+            result.update(
+                {
+                    "valid": True,
+                    "duration": duration,
+                    "format": info.get("ext", ""),
+                }
+            )
 
-            # Set video information
-            result["valid"] = True
-            result["duration"] = info.get("duration", 0)
-            result["file_size"] = info.get("filesize", 0)
-            result["format"] = info.get("ext", "")
-
-    except yt_dlp.utils.DownloadError as e:
-        result["error"] = f"Download error: {str(e)}"
-        print(f"DownloadError: {str(e)}", file=sys.stderr)
-        print(traceback.format_exc(), file=sys.stderr)
     except Exception as e:
-        result["error"] = f"Validation error: {str(e)}"
-        print(f"Unexpected error: {str(e)}", file=sys.stderr)
-        print(traceback.format_exc(), file=sys.stderr)
+        result["error"] = str(e)
 
-    print(f"Validation result: {json.dumps(result, indent=2)}", file=sys.stderr)
     return result
 
 

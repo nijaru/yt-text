@@ -20,10 +20,10 @@ document
 		// Basic validation
 		if (!validateURL(url)) {
 			responseDiv.innerHTML = `
-            <div class="bg-red-500 text-white p-4 rounded-md">
-                <p>Please enter a valid YouTube URL</p>
-            </div>
-        `;
+                <div class="bg-red-500 text-white p-4 rounded-md">
+                    <p>Please enter a valid YouTube URL</p>
+                </div>
+            `;
 			return;
 		}
 
@@ -31,16 +31,17 @@ document
 		submitButton.disabled = true;
 		statusDiv.classList.remove("hidden");
 		statusDiv.innerHTML = `
-        <div class="flex items-center">
-            <div class="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500 mr-2"></div>
-            <span>Processing video...</span>
-        </div>
-    `;
+            <div class="flex items-center">
+                <div class="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500 mr-2"></div>
+                <span>Processing video...</span>
+            </div>
+        `;
 
 		try {
 			const formData = new FormData();
 			formData.append("url", url);
 
+			// Start transcription
 			const response = await fetch("/api/v1/transcribe", {
 				method: "POST",
 				body: formData,
@@ -52,27 +53,27 @@ document
 				throw new Error(data.error || "Failed to process video");
 			}
 
-			// Start checking status
-			checkStatus(data.id);
+			// Poll for status
+			await pollTranscriptionStatus(data.id, statusDiv, responseDiv);
 		} catch (error) {
 			statusDiv.classList.add("hidden");
 			responseDiv.innerHTML = `
-            <div class="bg-red-500 text-white p-4 rounded-md">
-                <p>${error.message}</p>
-            </div>
-        `;
+                <div class="bg-red-500 text-white p-4 rounded-md">
+                    <p>${error.message}</p>
+                </div>
+            `;
 		} finally {
 			submitButton.disabled = false;
 		}
 	});
 
-async function checkStatus(id) {
-	const statusDiv = document.getElementById("transcriptionStatus");
-	const responseDiv = document.getElementById("response");
+async function pollTranscriptionStatus(id, statusDiv, responseDiv) {
+	const maxAttempts = 30 * 60; // 30 minutes at 1-second intervals
+	let attempts = 0;
 
-	try {
-		while (true) {
-			const response = await fetch(`/api/v1/transcribe/status/${id}`);
+	while (attempts < maxAttempts) {
+		try {
+			const response = await fetch(`/api/v1/transcribe/${id}`);
 			const data = await response.json();
 
 			if (!response.ok) {
@@ -80,12 +81,12 @@ async function checkStatus(id) {
 			}
 
 			if (data.status === "completed") {
+				// Hide status and show result
 				statusDiv.classList.add("hidden");
-
-				// Show transcription
 				document
 					.getElementById("transcriptionHeader")
 					.classList.remove("hidden");
+
 				responseDiv.innerHTML = `
                     <div class="bg-gray-700 p-4 rounded-md">
                         <pre class="whitespace-pre-wrap">${data.transcription}</pre>
@@ -93,24 +94,7 @@ async function checkStatus(id) {
                 `;
 
 				// Enable action buttons
-				const copyButton = document.getElementById("copyButton");
-				copyButton.classList.remove("hidden");
-				copyButton.onclick = () => {
-					navigator.clipboard.writeText(data.transcription);
-				};
-
-				const downloadButton = document.getElementById("downloadButton");
-				downloadButton.classList.remove("hidden");
-				downloadButton.onclick = () => {
-					const blob = new Blob([data.transcription], { type: "text/plain" });
-					const url = URL.createObjectURL(blob);
-					const a = document.createElement("a");
-					a.href = url;
-					a.download = "transcription.txt";
-					a.click();
-					URL.revokeObjectURL(url);
-				};
-
+				setupActionButtons(data.transcription);
 				break;
 			}
 
@@ -126,15 +110,47 @@ async function checkStatus(id) {
                 </div>
             `;
 
-			// Wait before checking again
-			await new Promise((resolve) => setTimeout(resolve, 2000));
+			// Wait before next attempt
+			await new Promise((resolve) => setTimeout(resolve, 1000));
+			attempts++;
+		} catch (error) {
+			statusDiv.classList.add("hidden");
+			responseDiv.innerHTML = `
+                <div class="bg-red-500 text-white p-4 rounded-md">
+                    <p>${error.message}</p>
+                </div>
+            `;
+			break;
 		}
-	} catch (error) {
+	}
+
+	if (attempts >= maxAttempts) {
 		statusDiv.classList.add("hidden");
 		responseDiv.innerHTML = `
             <div class="bg-red-500 text-white p-4 rounded-md">
-                <p>${error.message}</p>
+                <p>Transcription timed out. Please try again.</p>
             </div>
         `;
 	}
+}
+
+function setupActionButtons(transcription) {
+	const copyButton = document.getElementById("copyButton");
+	const downloadButton = document.getElementById("downloadButton");
+
+	copyButton.classList.remove("hidden");
+	copyButton.onclick = () => {
+		navigator.clipboard.writeText(transcription);
+	};
+
+	downloadButton.classList.remove("hidden");
+	downloadButton.onclick = () => {
+		const blob = new Blob([transcription], { type: "text/plain" });
+		const url = URL.createObjectURL(blob);
+		const a = document.createElement("a");
+		a.href = url;
+		a.download = "transcription.txt";
+		a.click();
+		URL.revokeObjectURL(url);
+	};
 }

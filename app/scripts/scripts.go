@@ -13,17 +13,13 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// Config holds the configuration for the ScriptRunner
 type Config struct {
 	PythonPath  string
 	ScriptsPath string
 	Timeout     time.Duration
 	TempDir     string
-	DownloadDir string
-	Environment []string
 }
 
-// VideoInfo represents the response from video validation
 type VideoInfo struct {
 	Valid    bool    `json:"valid"`
 	Duration float64 `json:"duration"`
@@ -32,42 +28,11 @@ type VideoInfo struct {
 	Error    string  `json:"error,omitempty"`
 }
 
-// TranscriptionResult represents the response from transcription
 type TranscriptionResult struct {
-	Text      string            `json:"text"`
-	ModelName string            `json:"model_name"`
-	Duration  float64           `json:"duration"`
-	Segments  []TextSegment     `json:"segments,omitempty"`
-	Metadata  TranscriptionMeta `json:"metadata"`
-	Error     string            `json:"error,omitempty"`
-}
-
-type TextSegment struct {
-	Start   float64 `json:"start"`
-	End     float64 `json:"end"`
-	Text    string  `json:"text"`
-	Speaker string  `json:"speaker,omitempty"`
-}
-
-type TranscriptionMeta struct {
-	Model       string  `json:"model"`
-	Language    string  `json:"language"`
-	Confidence  float64 `json:"confidence"`
-	ProcessTime float64 `json:"process_time"`
-}
-
-// SummaryResult represents the response from summarization
-type SummaryResult struct {
-	Summary   string      `json:"summary"`
-	ModelName string      `json:"model_name"`
-	Metadata  SummaryMeta `json:"metadata"`
-	Error     string      `json:"error,omitempty"`
-}
-
-type SummaryMeta struct {
-	OriginalLength int     `json:"original_length"`
-	SummaryLength  int     `json:"summary_length"`
-	Ratio          float64 `json:"ratio"`
+	Text      string  `json:"text"`
+	ModelName string  `json:"model_name"`
+	Duration  float64 `json:"duration"`
+	Error     string  `json:"error,omitempty"`
 }
 
 type ScriptRunner struct {
@@ -82,7 +47,7 @@ func NewScriptRunner(cfg Config) (*ScriptRunner, error) {
 	}
 
 	// Verify required scripts exist
-	requiredScripts := []string{"validate.py", "transcribe.py", "summarize.py"}
+	requiredScripts := []string{"validate.py", "transcribe.py"}
 	for _, script := range requiredScripts {
 		scriptPath := filepath.Join(cfg.ScriptsPath, script)
 		if _, err := os.Stat(scriptPath); os.IsNotExist(err) {
@@ -98,6 +63,7 @@ func NewScriptRunner(cfg Config) (*ScriptRunner, error) {
 
 func (r *ScriptRunner) Validate(ctx context.Context, url string) (VideoInfo, error) {
 	var result VideoInfo
+
 	output, err := r.runScript(ctx, "validate.py", map[string]string{
 		"url": url,
 	})
@@ -115,58 +81,29 @@ func (r *ScriptRunner) Validate(ctx context.Context, url string) (VideoInfo, err
 func (r *ScriptRunner) Transcribe(ctx context.Context, url string, opts map[string]string) (TranscriptionResult, error) {
 	var result TranscriptionResult
 
-	// Add debug logging for options
-	r.logger.WithFields(logrus.Fields{
+	logger := r.logger.WithFields(logrus.Fields{
 		"url":  url,
 		"opts": opts,
-	}).Debug("Starting transcription with options")
+	})
+	logger.Debug("Starting transcription")
 
 	args := map[string]string{
 		"url": url,
 	}
-	// Add model and language options
+	// Add model options
 	for k, v := range opts {
 		args[k] = v
-		r.logger.WithFields(logrus.Fields{
-			"key":   k,
-			"value": v,
-		}).Debug("Adding transcription option")
 	}
 
 	output, err := r.runScript(ctx, "transcribe.py", args)
 	if err != nil {
-		r.logger.WithError(err).Error("Transcription script execution failed")
+		logger.WithError(err).Error("Transcription script execution failed")
 		return result, fmt.Errorf("transcription failed: %w", err)
 	}
 
-	// Log raw output for debugging
-	r.logger.WithField("output", string(output)).Debug("Raw transcription output")
-
 	if err := json.Unmarshal(output, &result); err != nil {
-		r.logger.WithError(err).Error("Failed to parse transcription result")
+		logger.WithError(err).Error("Failed to parse transcription result")
 		return result, fmt.Errorf("failed to parse transcription result: %w", err)
-	}
-
-	return result, nil
-}
-
-func (r *ScriptRunner) Summarize(ctx context.Context, text string, opts map[string]string) (SummaryResult, error) {
-	var result SummaryResult
-
-	args := map[string]string{
-		"text": text,
-	}
-	for k, v := range opts {
-		args[k] = v
-	}
-
-	output, err := r.runScript(ctx, "summarize.py", args)
-	if err != nil {
-		return result, fmt.Errorf("summarization failed: %w", err)
-	}
-
-	if err := json.Unmarshal(output, &result); err != nil {
-		return result, fmt.Errorf("failed to parse summary result: %w", err)
 	}
 
 	return result, nil
@@ -175,21 +112,19 @@ func (r *ScriptRunner) Summarize(ctx context.Context, text string, opts map[stri
 func (r *ScriptRunner) runScript(ctx context.Context, scriptName string, args map[string]string) ([]byte, error) {
 	scriptPath := filepath.Join(r.config.ScriptsPath, scriptName)
 	logger := r.logger.WithFields(logrus.Fields{
-		"scriptPath": scriptPath,
-		"scriptName": scriptName,
-		"args":       args,
+		"script": scriptName,
+		"args":   args,
 	})
 
-	logger.Info("Preparing to execute script")
+	logger.Info("Executing script")
 
 	// Build command with args
 	cmdArgs := []string{"run", scriptPath}
 
 	// Special handling for URL argument in transcribe.py
 	if url, hasURL := args["url"]; hasURL && scriptName == "transcribe.py" {
-		// Add URL as positional argument
 		cmdArgs = append(cmdArgs, url)
-		delete(args, "url") // Remove from named args
+		delete(args, "url")
 	}
 
 	// Add remaining arguments as named flags
@@ -200,16 +135,12 @@ func (r *ScriptRunner) runScript(ctx context.Context, scriptName string, args ma
 	}
 	cmdArgs = append(cmdArgs, "--json")
 
-	logger.WithFields(logrus.Fields{
-		"command": "uv",
-		"args":    cmdArgs,
-		"dir":     r.config.ScriptsPath,
-		"env":     r.config.Environment,
-	}).Debug("Executing command")
-
 	cmd := exec.CommandContext(ctx, "uv", cmdArgs...)
-	cmd.Env = append(os.Environ(), r.config.Environment...)
 	cmd.Dir = r.config.ScriptsPath
+	cmd.Env = append(os.Environ(),
+		"PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512",
+		"CUDA_LAUNCH_BLOCKING=1",
+	)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -227,35 +158,4 @@ func (r *ScriptRunner) runScript(ctx context.Context, scriptName string, args ma
 	}
 
 	return stdout.Bytes(), nil
-}
-
-func validateConfig(cfg Config) error {
-	if cfg.PythonPath == "" {
-		return fmt.Errorf("python path is required")
-	}
-	if cfg.ScriptsPath == "" {
-		return fmt.Errorf("scripts path is required")
-	}
-	if cfg.Timeout == 0 {
-		return fmt.Errorf("timeout must be set")
-	}
-
-	// Validate paths exist
-	paths := []string{cfg.ScriptsPath, cfg.TempDir, cfg.DownloadDir}
-	for _, path := range paths {
-		if err := os.MkdirAll(path, 0755); err != nil {
-			return fmt.Errorf("failed to create directory %s: %w", path, err)
-		}
-	}
-
-	// Validate required scripts exist
-	scripts := []string{"validate.py", "transcribe.py", "summarize.py"}
-	for _, script := range scripts {
-		path := filepath.Join(cfg.ScriptsPath, script)
-		if _, err := os.Stat(path); os.IsNotExist(err) {
-			return fmt.Errorf("required script not found: %s", script)
-		}
-	}
-
-	return nil
 }

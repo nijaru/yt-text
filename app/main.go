@@ -13,10 +13,8 @@ import (
 	"github.com/nijaru/yt-text/config"
 	"github.com/nijaru/yt-text/handlers/api"
 	"github.com/nijaru/yt-text/logger"
-	"github.com/nijaru/yt-text/repository"
 	"github.com/nijaru/yt-text/repository/sqlite"
 	"github.com/nijaru/yt-text/scripts"
-	"github.com/nijaru/yt-text/services/summary"
 	"github.com/nijaru/yt-text/services/video"
 	"github.com/nijaru/yt-text/validation"
 	"github.com/sirupsen/logrus"
@@ -80,15 +78,22 @@ func setupApplication(cfg *config.Config) error {
 	validator := validation.NewValidator(cfg)
 
 	// Initialize services
-	services, err := initializeServices(cfg, videoRepo, scriptRunner, validator)
-	if err != nil {
-		return fmt.Errorf("failed to initialize services: %w", err)
-	}
+	videoService := video.NewService(
+		videoRepo,
+		scriptRunner,
+		validator,
+		video.Config{
+			ProcessTimeout: cfg.Video.ProcessTimeout,
+			MaxDuration:    cfg.Video.MaxDuration,
+			MaxFileSize:    cfg.Video.MaxFileSize,
+			DefaultModel:   cfg.Video.DefaultModel,
+		},
+	)
 
 	// Initialize and start server
 	server := api.NewServer(
 		cfg,
-		api.WithServices(services.video, services.summary),
+		api.WithServices(videoService),
 		api.WithLogger(log),
 	)
 
@@ -116,60 +121,13 @@ func initializeDatabase(ctx context.Context, cfg *config.Config) (*sql.DB, error
 
 func initializeScriptRunner(cfg *config.Config) (*scripts.ScriptRunner, error) {
 	scriptConfig := scripts.Config{
-		PythonPath:  cfg.Scripts.PythonPath,
-		ScriptsPath: cfg.Scripts.ScriptsPath,
-		Timeout:     cfg.Scripts.Timeout,
+		PythonPath:  cfg.Video.PythonPath,
+		ScriptsPath: cfg.Video.ScriptsPath,
+		Timeout:     cfg.Video.ProcessTimeout,
 		TempDir:     cfg.TempDir,
-		DownloadDir: cfg.DownloadDir,
-		Environment: cfg.Scripts.Environment,
 	}
 
 	return scripts.NewScriptRunner(scriptConfig)
-}
-
-type services struct {
-	video   video.Service
-	summary summary.Service
-}
-
-func initializeServices(
-	cfg *config.Config,
-	videoRepo repository.VideoRepository,
-	scriptRunner *scripts.ScriptRunner,
-	validator *validation.Validator,
-) (*services, error) {
-	// Initialize video service
-	videoService := video.NewService(
-		videoRepo,
-		scriptRunner,
-		validator,
-		video.Config{
-			ProcessTimeout:  cfg.Video.ProcessTimeout,
-			CleanupInterval: cfg.Video.CleanupInterval,
-			MaxRetries:      cfg.Video.MaxRetries,
-			RetryDelay:      cfg.Video.RetryDelay,
-			DefaultModel:    cfg.Video.DefaultModel,
-		},
-	)
-
-	// Initialize summary service
-	summaryService := summary.NewService(
-		videoRepo,
-		scriptRunner,
-		validator,
-		summary.Config{
-			ModelName: cfg.Summary.ModelName,
-			MaxLength: cfg.Summary.MaxLength,
-			MinLength: cfg.Summary.MinLength,
-			BatchSize: cfg.Summary.BatchSize,
-			ChunkSize: cfg.Summary.ChunkSize,
-		},
-	)
-
-	return &services{
-		video:   videoService,
-		summary: summaryService,
-	}, nil
 }
 
 func startServer(server *api.Server, cfg *config.Config) error {

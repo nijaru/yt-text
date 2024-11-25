@@ -9,7 +9,6 @@ import (
 
 	"github.com/nijaru/yt-text/config"
 	"github.com/nijaru/yt-text/middleware"
-	"github.com/nijaru/yt-text/services/summary"
 	"github.com/nijaru/yt-text/services/video"
 	"github.com/nijaru/yt-text/validation"
 	"github.com/sirupsen/logrus"
@@ -17,7 +16,6 @@ import (
 
 type Server struct {
 	video     *VideoHandler
-	summary   *SummaryHandler
 	config    *config.Config
 	logger    *logrus.Logger
 	server    *http.Server
@@ -39,7 +37,6 @@ func NewServer(cfg *config.Config, opts ...ServerOption) *Server {
 		opt(s)
 	}
 
-	// Create HTTP server
 	s.server = &http.Server{
 		Addr:         ":" + cfg.ServerPort,
 		Handler:      s.routes(),
@@ -52,11 +49,10 @@ func NewServer(cfg *config.Config, opts ...ServerOption) *Server {
 }
 
 // WithServices sets up the handlers with the provided services
-func WithServices(videoSvc video.Service, summarySvc summary.Service) ServerOption {
+func WithServices(videoSvc video.Service) ServerOption {
 	return func(s *Server) {
 		validator := validation.NewValidator(s.config)
 		s.video = NewVideoHandler(videoSvc, validator)
-		s.summary = NewSummaryHandler(summarySvc, validator)
 	}
 }
 
@@ -110,16 +106,8 @@ func (s *Server) routes() http.Handler {
 func (s *Server) addV1Routes(mux *http.ServeMux) {
 	const v1Prefix = "/api/v1"
 
-	// Video transcription endpoints
-	mux.HandleFunc("POST "+v1Prefix+"/transcribe", s.video.HandleCreateTranscription)
-	mux.HandleFunc("GET "+v1Prefix+"/transcription", s.video.HandleGetTranscription)
-	mux.HandleFunc("POST "+v1Prefix+"/transcribe/cancel", s.video.HandleCancelTranscription)
-	mux.HandleFunc("GET "+v1Prefix+"/transcribe/status/{id}", s.video.HandleGetStatus)
-
-	// Summary endpoints
-	mux.HandleFunc("POST "+v1Prefix+"/summary", s.summary.HandleCreateSummary)
-	mux.HandleFunc("GET "+v1Prefix+"/summary", s.summary.HandleGetSummary)
-	mux.HandleFunc("GET "+v1Prefix+"/summary/status/{id}", s.summary.HandleGetSummaryStatus)
+	mux.HandleFunc("POST "+v1Prefix+"/transcribe", s.video.HandleTranscribe)
+	mux.HandleFunc("GET "+v1Prefix+"/transcribe/{id}", s.video.HandleGetTranscription)
 }
 
 // middleware sets up the middleware chain

@@ -20,8 +20,6 @@ CREATE TABLE IF NOT EXISTS videos (
     url TEXT UNIQUE NOT NULL,
     status TEXT NOT NULL,
     transcription TEXT,
-    summary TEXT,
-    model_info JSON NOT NULL,
     error TEXT,
     created_at DATETIME NOT NULL,
     updated_at DATETIME NOT NULL
@@ -30,7 +28,6 @@ CREATE TABLE IF NOT EXISTS videos (
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_videos_url ON videos(url);
 CREATE INDEX IF NOT EXISTS idx_videos_status ON videos(status);
-CREATE INDEX IF NOT EXISTS idx_videos_updated_at ON videos(updated_at);
 `
 
 type DBConfig struct {

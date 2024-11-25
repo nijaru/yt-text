@@ -15,9 +15,6 @@ FROM python:3.12-slim-bookworm AS runner
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app \
-    TRANSFORMERS_CACHE=/tmp \
-    HF_HOME=/tmp \
-    WHISPER_DOWNLOAD_ROOT=/tmp/models \
     VIRTUAL_ENV=/app/.venv \
     PATH="/app/.venv/bin:$PATH" \
     UV_CACHE_DIR=/tmp/uv-cache
@@ -31,14 +28,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && groupadd -r appuser && useradd -r -g appuser appuser
 
 # Copy uv from its official image
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/
 
 WORKDIR /app
 
-# Create necessary directories with proper permissions
-RUN mkdir -p /tmp/uv-cache \
-    && chown -R appuser:appuser /tmp/uv-cache \
-    && chmod -R 777 /tmp/uv-cache
+# Create and set up directories
+RUN mkdir -p /tmp/uv-cache /app/logs /app/data /tmp/transcribe \
+    && chown -R appuser:appuser /app /tmp/transcribe /tmp/uv-cache \
+    && chmod -R 755 /tmp/transcribe
 
 # Install dependencies in venv using uv
 COPY python/pyproject.toml ./
@@ -49,14 +46,7 @@ COPY python/scripts/*.py /app/scripts/
 COPY --from=builder /bin/main /usr/local/bin/main
 COPY static/ /app/static/
 
-# Set up directories and permissions
-RUN mkdir -p /app/logs /app/data /app/models /tmp/transcribe \
-    && chown -R appuser:appuser /app /tmp/transcribe \
-    && chmod -R 755 /app/scripts/*.py \
-    && chmod 1777 /tmp \
-    && chmod -R 777 /app/logs \
-    && chmod -R 777 /app/data \
-    && chmod -R 777 /app/models
+RUN chmod -R 755 /app/scripts/*.py
 
 USER appuser
 
