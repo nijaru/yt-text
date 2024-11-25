@@ -1,7 +1,6 @@
 package api
 
 import (
-	"fmt"
 	"net/http"
 
 	"github.com/nijaru/yt-text/errors"
@@ -175,21 +174,6 @@ func (h *SummaryHandler) validateSummaryParams(req *createSummaryRequest) error 
 	}
 
 	return nil
-}
-
-// Helper method for tracking summary progress
-func (h *SummaryHandler) trackProgress(
-	videoID string,
-	total int,
-	current int,
-) {
-	progress := float64(current) / float64(total) * 100
-	h.logger.WithFields(logrus.Fields{
-		"video_id": videoID,
-		"progress": fmt.Sprintf("%.2f%%", progress),
-		"current":  current,
-		"total":    total,
-	}).Debug("Summary progress")
 }
 
 // Helper method for error response with logging

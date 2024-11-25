@@ -6,34 +6,51 @@ services:
     image: yt-text:latest
     environment:
       # Server Configuration
-      - DB_PATH=/tmp/urls.db
       - SERVER_PORT=8080
       - READ_TIMEOUT=30s
       - WRITE_TIMEOUT=60s
       - IDLE_TIMEOUT=120s
-      - TRANSCRIBE_TIMEOUT=60m
+      - DEBUG=true
       - RATE_LIMIT=5
       - RATE_LIMIT_INTERVAL=5s
+
+      # Path Configuration
+      - LOG_DIR=/app/logs
+      - DB_PATH=/app/data/urls.db
+      - MODEL_PATH=/app/models
+      - SCRIPTS_PATH=/app/scripts
 
       # Model Configuration
       - MODEL_NAME=base.en
       - SUMMARY_MODEL_NAME=facebook/bart-large-cnn
+      - MODEL_CACHE_DIR=/tmp/model-cache
+      - WHISPER_MODEL=base.en
+      - WHISPER_DOWNLOAD_ROOT=/tmp/models
+      - TRANSFORMERS_CACHE=/tmp
+      - HF_HOME=/tmp
+      - TRANSCRIBE_TIMEOUT=60m
 
       # Python Environment
       - PYTHONDONTWRITEBYTECODE=1
       - PYTHONUNBUFFERED=1
-      - WHISPER_DOWNLOAD_ROOT=/tmp/models
-      - PYTHONPATH=/app
-      - TRANSFORMERS_CACHE=/tmp
-      - HF_HOME=/tmp
-      - XDG_CACHE_HOME=/tmp
-      - TORCH_HOME=/tmp
+      - PYTHON_PATH=/app/.venv/bin/python
+      - VIRTUAL_ENV=/app/.venv
+      - PATH=/app/.venv/bin:$PATH
+      - UV_CACHE_DIR=/tmp/uv-cache
+
+    ports:
+      - "8080:8080"
+      - "2345:2345"
 
     volumes:
       - ./app:/app/src
-      - ./python/scripts:/app/scripts
       - ./static:/app/static
+      - app_logs:/app/logs
+      - app_data:/app/data
+      - app_models:/app/models
       - whisper_cache:/tmp/models
+
+    working_dir: /app
 
     tmpfs:
       - /tmp
@@ -56,15 +73,14 @@ services:
         max-size: "10m"
         max-file: "3"
 
-    ports:
-      - "8080:8080"
-      - "2345:2345"
-
     networks:
       - yt_text_dev
 
 volumes:
   whisper_cache:
+  app_logs:
+  app_data:
+  app_models:
 
 networks:
   yt_text_dev:

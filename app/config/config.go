@@ -88,6 +88,7 @@ type VideoConfig struct {
 	MaxDuration       time.Duration `json:"max_duration"`
 	MaxFileSize       int64         `json:"max_file_size"`
 	AllowedFormats    []string      `json:"allowed_formats"`
+	DefaultModel      string        `json:"default_model"`
 }
 
 type SummaryConfig struct {
@@ -180,6 +181,7 @@ func Load() (*Config, error) {
 			MaxDuration:       getEnvAsDuration("VIDEO_MAX_DURATION", 4*time.Hour),
 			MaxFileSize:       getEnvAsInt64("VIDEO_MAX_FILE_SIZE", 100*1024*1024), // 100MB
 			AllowedFormats:    getEnvAsStringSlice("VIDEO_ALLOWED_FORMATS", []string{"mp4", "webm"}),
+			DefaultModel:      getEnv("WHISPER_MODEL", "base.en"),
 		},
 
 		// Summary Service

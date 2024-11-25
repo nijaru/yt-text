@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/nijaru/yt-text/config"
 	"github.com/nijaru/yt-text/handlers/api"
@@ -43,7 +44,10 @@ func main() {
 }
 
 func setupApplication(cfg *config.Config) error {
-	log := logrus.StandardLogger()
+	log := logrus.New()
+	log.SetFormatter(&logrus.JSONFormatter{
+		TimestampFormat: time.RFC3339,
+	})
 
 	// Initialize database with context for shutdown
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
@@ -140,11 +144,11 @@ func initializeServices(
 		scriptRunner,
 		validator,
 		video.Config{
-			MaxConcurrentJobs: cfg.Video.MaxConcurrentJobs,
-			ProcessTimeout:    cfg.Video.ProcessTimeout,
-			CleanupInterval:   cfg.Video.CleanupInterval,
-			MaxRetries:        cfg.Video.MaxRetries,
-			RetryDelay:        cfg.Video.RetryDelay,
+			ProcessTimeout:  cfg.Video.ProcessTimeout,
+			CleanupInterval: cfg.Video.CleanupInterval,
+			MaxRetries:      cfg.Video.MaxRetries,
+			RetryDelay:      cfg.Video.RetryDelay,
+			DefaultModel:    cfg.Video.DefaultModel,
 		},
 	)
 

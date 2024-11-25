@@ -64,16 +64,18 @@
         >
             <div class="bg-gray-800 shadow-md rounded p-6 w-full max-w-2xl">
                 <h2 class="text-2xl font-bold mb-4">Transcribe a Video</h2>
+
+                <!-- Form -->
                 <form id="transcriptionForm" class="mb-4">
                     <label for="url" class="block text-lg font-medium mb-2"
-                        >Enter a URL:</label
+                        >Enter a YouTube URL:</label
                     >
                     <input
                         type="url"
                         id="url"
                         name="url"
                         class="w-full p-2 border border-gray-600 rounded mb-4 bg-gray-700 text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                        placeholder="https://example.com/video"
+                        placeholder="https://www.youtube.com/watch?v=..."
                         required
                     />
                     <div class="flex space-x-4">
@@ -88,13 +90,28 @@
                         </button>
                     </div>
                 </form>
-                <div id="transcriptionStatus" class="mt-4 text-lg hidden">
-                    Transcription in progress...
+
+                <!-- Error Message -->
+                <div id="error-message" class="text-red-500 mt-4"></div>
+
+                <!-- Status -->
+                <div
+                    id="transcriptionStatus"
+                    class="hidden mt-4 bg-gray-700 p-4 rounded-md"
+                >
+                    <div class="flex items-center">
+                        <div
+                            class="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500 mr-2"
+                        ></div>
+                        <span>Starting transcription...</span>
+                    </div>
                 </div>
+
+                <!-- Action Buttons -->
                 <div class="flex space-x-4 mt-4">
                     <button
                         id="copyButton"
-                        class="bg-yellow-500 text-white px-4 py-2 rounded hover:bg-yellow-600 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-yellow-500 focus:ring-opacity-50 hidden"
+                        class="hidden bg-yellow-500 text-white px-4 py-2 rounded hover:bg-yellow-600 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-yellow-500 focus:ring-opacity-50"
                     >
                         <span class="flex items-center">
                             <i class="fas fa-copy mr-2"></i>
@@ -103,7 +120,7 @@
                     </button>
                     <button
                         id="downloadButton"
-                        class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-50 hidden"
+                        class="hidden bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-50"
                     >
                         <span class="flex items-center">
                             <i class="fas fa-download mr-2"></i>
@@ -111,22 +128,18 @@
                         </span>
                     </button>
                 </div>
-                <div
-                    id="spinner"
-                    class="mt-4 hidden flex items-center justify-center"
-                >
-                    <div
-                        class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"
-                    ></div>
-                    <span class="ml-3">Processing...</span>
-                </div>
+
+                <!-- Result -->
                 <h3
                     id="transcriptionHeader"
-                    class="text-xl font-bold mt-4 hidden"
+                    class="text-xl font-bold mt-6 mb-4 hidden"
                 >
                     Transcription:
                 </h3>
-                <div id="response" class="mt-4 text-lg"></div>
+                <div
+                    id="response"
+                    class="mt-4 bg-gray-700 rounded-md overflow-auto"
+                ></div>
             </div>
         </main>
 
@@ -167,6 +180,8 @@
                 </p>
             </div>
         </footer>
+
         <script type="module" src="/static/formHandler.js"></script>
+        <script type="module" src="/static/utils.js"></script>
     </body>
 </html>

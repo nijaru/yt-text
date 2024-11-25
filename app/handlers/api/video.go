@@ -38,32 +38,47 @@ func (h *VideoHandler) HandleCreateTranscription(w http.ResponseWriter, r *http.
 	if err := h.validator.ValidateRequest(r, validation.RequestValidationOpts{
 		MaxContentLength: 1024 * 1024, // 1MB
 		AllowedMethods:   []string{http.MethodPost},
-		RequireJSON:      true,
+		RequireJSON:      false,
 	}); err != nil {
 		respondError(w, r, err)
 		return
 	}
 
-	var req createTranscriptionRequest
-	if err := readJSON(r, &req); err != nil {
-		respondError(w, r, err)
+	// Parse form data
+	if err := r.ParseForm(); err != nil {
+		logger.WithError(err).Error("Failed to parse form data")
+		respondError(w, r, errors.InvalidInput(op, err, "Failed to parse form data"))
 		return
 	}
 
-	// Basic URL validation
-	if err := h.validator.BasicURLValidation(req.URL); err != nil {
-		respondError(w, r, err)
+	url := r.FormValue("url")
+	logger.WithField("url", url).Info("Received transcription request")
+
+	if url == "" {
+		respondError(w, r, errors.InvalidInput(op, nil, "URL is required"))
 		return
 	}
 
-	video, err := h.service.Create(r.Context(), req.URL)
+	video, err := h.service.Create(r.Context(), url)
 	if err != nil {
 		logger.WithError(err).Error("Failed to create transcription")
 		respondError(w, r, err)
 		return
 	}
 
-	respondJSON(w, r, http.StatusAccepted, models.NewVideoResponse(video))
+	logger.WithFields(logrus.Fields{
+		"video_id": video.ID,
+		"status":   video.Status,
+	}).Info("Transcription job created")
+
+	// Ensure we're returning a proper response
+	response := map[string]interface{}{
+		"id":     video.ID,
+		"status": string(video.Status),
+		"url":    video.URL,
+	}
+
+	respondJSON(w, r, http.StatusAccepted, response)
 }
 
 // HandleGetTranscription handles GET /api/v1/transcription
@@ -140,13 +155,6 @@ func (h *VideoHandler) HandleCancelTranscription(w http.ResponseWriter, r *http.
 func (h *VideoHandler) HandleGetStatus(w http.ResponseWriter, r *http.Request) {
 	const op = "VideoHandler.HandleGetStatus"
 	logger := h.logger.WithContext(r.Context())
-
-	if err := h.validator.ValidateRequest(r, validation.RequestValidationOpts{
-		AllowedMethods: []string{http.MethodGet},
-	}); err != nil {
-		respondError(w, r, err)
-		return
-	}
 
 	id := r.PathValue("id")
 	if id == "" {

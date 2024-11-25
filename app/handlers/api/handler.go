@@ -41,13 +41,6 @@ func respondJSON(w http.ResponseWriter, r *http.Request, code int, payload inter
 		Timestamp: time.Now().UTC(),
 	}
 
-	if !response.Success && payload != nil {
-		if err, ok := payload.(string); ok {
-			response.Error = err
-			response.Data = nil
-		}
-	}
-
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 
@@ -70,11 +63,9 @@ func respondError(w http.ResponseWriter, r *http.Request, err error) {
 		"error":      err,
 		"status":     code,
 		"request_id": r.Context().Value("request_id"),
-		"path":       r.URL.Path,
-		"method":     r.Method,
 	}).Error("Request error")
 
-	respondJSON(w, r, code, msg)
+	respondJSON(w, r, code, map[string]string{"error": msg})
 }
 
 func readJSON(r *http.Request, v interface{}) error {

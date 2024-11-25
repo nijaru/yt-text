@@ -78,15 +78,9 @@ func (r *SQLiteRepository) Create(ctx context.Context, video *models.Video) erro
 	r.stmtMutex.RLock()
 	defer r.stmtMutex.RUnlock()
 
-	// Marshal JSON fields
 	modelInfo, err := json.Marshal(video.ModelInfo)
 	if err != nil {
 		return errors.Internal(op, err, "failed to marshal model info")
-	}
-
-	progress, err := json.Marshal(video.Progress)
-	if err != nil {
-		return errors.Internal(op, err, "failed to marshal progress")
 	}
 
 	result, err := r.stmts.create.ExecContext(ctx,
@@ -97,7 +91,6 @@ func (r *SQLiteRepository) Create(ctx context.Context, video *models.Video) erro
 		video.Summary,
 		modelInfo,
 		video.Error,
-		progress,
 		video.CreatedAt,
 		video.UpdatedAt,
 	)
@@ -153,15 +146,9 @@ func (r *SQLiteRepository) Update(ctx context.Context, video *models.Video) erro
 	r.stmtMutex.RLock()
 	defer r.stmtMutex.RUnlock()
 
-	// Marshal JSON fields
 	modelInfo, err := json.Marshal(video.ModelInfo)
 	if err != nil {
 		return errors.Internal(op, err, "failed to marshal model info")
-	}
-
-	progress, err := json.Marshal(video.Progress)
-	if err != nil {
-		return errors.Internal(op, err, "failed to marshal progress")
 	}
 
 	result, err := r.stmts.update.ExecContext(ctx,
@@ -170,7 +157,6 @@ func (r *SQLiteRepository) Update(ctx context.Context, video *models.Video) erro
 		video.Summary,
 		modelInfo,
 		video.Error,
-		progress,
 		time.Now(), // updated_at
 		video.ID,
 	)
@@ -238,7 +224,7 @@ func (r *SQLiteRepository) scanVideo(row *sql.Row) (*models.Video, error) {
 	const op = "SQLiteRepository.scanVideo"
 
 	video := &models.Video{}
-	var modelInfoJSON, progressJSON []byte
+	var modelInfoJSON []byte
 	var status string
 
 	err := row.Scan(
@@ -249,7 +235,6 @@ func (r *SQLiteRepository) scanVideo(row *sql.Row) (*models.Video, error) {
 		&video.Summary,
 		&modelInfoJSON,
 		&video.Error,
-		&progressJSON,
 		&video.CreatedAt,
 		&video.UpdatedAt,
 	)
@@ -265,9 +250,6 @@ func (r *SQLiteRepository) scanVideo(row *sql.Row) (*models.Video, error) {
 	if err := json.Unmarshal(modelInfoJSON, &video.ModelInfo); err != nil {
 		return nil, errors.Internal(op, err, "failed to unmarshal model info")
 	}
-	if err := json.Unmarshal(progressJSON, &video.Progress); err != nil {
-		return nil, errors.Internal(op, err, "failed to unmarshal progress")
-	}
 
 	return video, nil
 }
@@ -278,7 +260,7 @@ func (r *SQLiteRepository) scanVideos(rows *sql.Rows) ([]*models.Video, error) {
 	var videos []*models.Video
 	for rows.Next() {
 		video := &models.Video{}
-		var modelInfoJSON, progressJSON []byte
+		var modelInfoJSON []byte
 		var status string
 
 		err := rows.Scan(
@@ -289,7 +271,6 @@ func (r *SQLiteRepository) scanVideos(rows *sql.Rows) ([]*models.Video, error) {
 			&video.Summary,
 			&modelInfoJSON,
 			&video.Error,
-			&progressJSON,
 			&video.CreatedAt,
 			&video.UpdatedAt,
 		)
@@ -301,9 +282,6 @@ func (r *SQLiteRepository) scanVideos(rows *sql.Rows) ([]*models.Video, error) {
 
 		if err := json.Unmarshal(modelInfoJSON, &video.ModelInfo); err != nil {
 			return nil, errors.Internal(op, err, "failed to unmarshal model info")
-		}
-		if err := json.Unmarshal(progressJSON, &video.Progress); err != nil {
-			return nil, errors.Internal(op, err, "failed to unmarshal progress")
 		}
 
 		videos = append(videos, video)

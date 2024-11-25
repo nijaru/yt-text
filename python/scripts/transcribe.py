@@ -234,7 +234,6 @@ class Transcriber:
     def __init__(self, config: TranscriptionConfig):
         self.config = config
         self.model = self._setup_model()  # Initialize model in constructor
-        self.progress: float = 0.0
 
     def transcribe(self, audio_file: str) -> str:
         """Transcribe audio file to text"""
@@ -330,7 +329,7 @@ class Transcriber:
             raise RuntimeError(f"Failed to setup model: {e}") from e
 
     def _perform_transcription(self, audio_file: str) -> str:
-        """Perform the actual transcription with progress tracking"""
+        """Perform the actual transcription"""
         try:
             segments, info = self.model.transcribe(
                 audio_file,
@@ -350,26 +349,11 @@ class Transcriber:
                 raise TranscriptionError("No speech segments detected")
 
             transcribed_text = []
-            total_segments = len(segments)
 
             for idx, segment in enumerate(segments, 1):
                 # Skip empty segments
                 if not segment.text or not segment.text.strip():
                     continue
-
-                # Report progress
-                progress = (idx / total_segments) * 100
-                print(
-                    json.dumps(
-                        {
-                            "status": "transcribing",
-                            "progress": round(progress, 2),
-                            "segment": idx,
-                            "total": total_segments,
-                        }
-                    ),
-                    file=sys.stderr,
-                )
 
                 transcribed_text.append(segment.text.strip())
 
@@ -614,14 +598,14 @@ def retry_with_backoff(
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Download audio from youtube video and convert it to text"
+        description="Download YouTube audio and convert it to text"
     )
     parser.add_argument("url", type=str, help="URL of the youtube video")
     parser.add_argument(
         "--model", type=str, default="base.en", help="Name of the Whisper model to use"
     )
     parser.add_argument(
-        "--json", action="store_true", help="Return the transcription as a JSON object"
+        "--language", type=str, default="en", help="Language code for transcription"
     )
     parser.add_argument(
         "--temperature",
@@ -633,7 +617,7 @@ def parse_args():
         "--beam-size",
         type=int,
         default=3,
-        help="Beam search size (0-5). Higher = more accurate but slower. 0 disables beam search",
+        help="Beam search size (0-5). Higher = more accurate but slower",
     )
     parser.add_argument(
         "--best-of",
@@ -641,6 +625,7 @@ def parse_args():
         default=1,
         help="Number of transcription attempts (1-5). Higher = more accurate but slower",
     )
+    parser.add_argument("--json", action="store_true", help="Output in JSON format")
     parser.add_argument(
         "--temp-dir", type=str, default=TEMP_DIR, help="Directory for temporary files"
     )
@@ -649,21 +634,40 @@ def parse_args():
         type=str,
         help="Directory for downloaded files (default: <temp_dir>/downloads)",
     )
-    parser.add_argument(
-        "--max-duration",
-        type=int,
-        default=MAX_VIDEO_DURATION,
-        help="Maximum video duration in seconds (default: 14400, 4 hours)",
-    )
     return parser.parse_args()
 
 
 def main():
-    check_dependencies()
-    args = parse_args()
-    config = TranscriptionConfig.from_args(args)
-    app = Application(config)
-    app.run()
+    try:
+        # Check dependencies first
+        check_dependencies()
+
+        # Parse arguments
+        args = parse_args()
+
+        # Print initial status
+        print(
+            json.dumps(
+                {
+                    "status": "starting",
+                    "url": args.url,
+                    "model": args.model,
+                }
+            ),
+            file=sys.stderr,
+        )
+
+        # Create configuration and run
+        config = TranscriptionConfig.from_args(args)
+        app = Application(config)
+        app.run()
+
+    except Exception as e:
+        print(
+            json.dumps({"error": str(e), "traceback": traceback.format_exc()}),
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
 
 if __name__ == "__main__":

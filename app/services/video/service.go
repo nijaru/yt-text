@@ -2,7 +2,7 @@ package video
 
 import (
 	"context"
-	"sync"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -14,306 +14,338 @@ import (
 )
 
 type service struct {
-    repo         Repository
-    scripts      *scripts.ScriptRunner
-    validator    *validation.Validator
-    config       Config
-    activeJobs   sync.Map
-    jobSemaphore chan struct{}
-    shutdown     chan struct{}
-    logger       *logrus.Logger
+	repo      Repository
+	scripts   *scripts.ScriptRunner
+	validator *validation.Validator
+	config    Config
+	logger    *logrus.Logger
 }
 
 func NewService(
-    repo Repository,
-    scriptRunner *scripts.ScriptRunner,
-    validator *validation.Validator,
-    config Config,
+	repo Repository,
+	scriptRunner *scripts.ScriptRunner,
+	validator *validation.Validator,
+	config Config,
 ) Service {
-    s := &service{
-        repo:         repo,
-        scripts:      scriptRunner,
-        validator:    validator,
-        config:       config,
-        jobSemaphore: make(chan struct{}, config.MaxConcurrentJobs),
-        shutdown:     make(chan struct{}),
-        logger:       logrus.StandardLogger(),
-    }
-
-    // Start cleanup routine
-    go s.cleanupRoutine()
-
-    return s
+	return &service{
+		repo:      repo,
+		scripts:   scriptRunner,
+		validator: validator,
+		config:    config,
+		logger:    logrus.StandardLogger(),
+	}
 }
 
+// processState represents what action to take with a video
+type processState int
+
+const (
+	stateCreate processState = iota
+	stateReturnExisting
+	stateRetry
+)
+
 func (s *service) Create(ctx context.Context, url string) (*models.Video, error) {
-    const op = "VideoService.Create"
-    logger := s.logger.WithContext(ctx).WithField("url", url)
+	const op = "VideoService.Create"
+	logger := s.logger.WithFields(logrus.Fields{
+		"operation": op,
+		"url":       url,
+	})
 
-    // Basic URL validation
-    if err := s.validator.BasicURLValidation(url); err != nil {
-        logger.WithError(err).Warn("Invalid URL format")
-        return nil, err
-    }
+	logger.Info("Starting video creation process")
 
-    // Check for existing video
-    existing, err := s.repo.GetByURL(ctx, url)
-    if err != nil && !errors.IsNotFound(err) {
-        logger.WithError(err).Error("Failed to check existing video")
-        return nil, errors.Internal(op, err, "Failed to check existing video")
-    }
-    if existing != nil {
-        return existing, nil
-    }
+	// Determine what to do with this URL
+	video, state, err := s.determineVideoState(ctx, url)
+	if err != nil {
+		return nil, err
+	}
 
-    // Deep validation with Python script
-    info, err := s.scripts.Validate(ctx, url)
-    if err != nil {
-        logger.WithError(err).Error("Failed to validate video")
-        return nil, errors.InvalidInput(op, err, "Invalid video URL")
-    }
+	switch state {
+	case stateReturnExisting:
+		logger.WithField("video_id", video.ID).Info("Returning existing video")
+		return video, nil
 
-    if !info.Valid {
-        return nil, errors.InvalidInput(op, nil, info.Error)
-    }
+	case stateRetry:
+		logger.WithField("video_id", video.ID).Info("Retrying failed video")
+		return s.retryVideo(ctx, video)
 
-    // Create new video record
-    video := &models.Video{
-        ID:        uuid.New().String(),
-        URL:       url,
-        Status:    models.StatusPending,
-        CreatedAt: time.Now(),
-        UpdatedAt: time.Now(),
-        ModelInfo: models.ModelInfo{
-            Duration: info.Duration,
-            FileSize: info.FileSize,
-            Format:   info.Format,
-        },
-    }
+	case stateCreate:
+		logger.Info("Creating new video")
+		return s.createNewVideo(ctx, url)
 
-    if err := s.repo.Create(ctx, video); err != nil {
-        logger.WithError(err).Error("Failed to create video record")
-        return nil, errors.Internal(op, err, "Failed to create video record")
-    }
+	default:
+		return nil, errors.Internal(op, nil, "Invalid process state")
+	}
+}
 
-    // Start processing in background
-    go func() {
-        processCtx, cancel := context.WithTimeout(context.Background(), s.config.ProcessTimeout)
-        defer cancel()
+func (s *service) determineVideoState(ctx context.Context, url string) (*models.Video, processState, error) {
+	const op = "VideoService.determineVideoState"
 
-        if err := s.Process(processCtx, video.ID); err != nil {
-            logger.WithError(err).Error("Failed to process video")
-        }
-    }()
+	// Check for existing video
+	existing, err := s.repo.GetByURL(ctx, url)
+	if err != nil && !errors.IsNotFound(err) {
+		return nil, stateCreate, errors.Internal(op, err, "Failed to check existing video")
+	}
 
-    return video, nil
+	if existing == nil {
+		return nil, stateCreate, nil
+	}
+
+	// Determine state based on existing video status
+	switch {
+	case existing.IsCompleted():
+		return existing, stateReturnExisting, nil
+
+	case existing.IsProcessing():
+		// If it's stuck in processing for too long, retry it
+		if existing.IsStale(s.config.ProcessTimeout) {
+			s.logger.WithFields(logrus.Fields{
+				"video_id":   existing.ID,
+				"status":     existing.Status,
+				"updated_at": existing.UpdatedAt,
+			}).Info("Found stale processing video, will retry")
+			return existing, stateRetry, nil
+		}
+		// If it's already processing and not stale, just return it
+		return existing, stateReturnExisting, nil
+
+	case existing.IsPending():
+		// If it's pending, we should retry it
+		s.logger.WithField("video_id", existing.ID).Info("Found pending video, will retry")
+		return existing, stateRetry, nil
+
+	case existing.IsFailed() || existing.IsCancelled():
+		s.logger.WithFields(logrus.Fields{
+			"video_id": existing.ID,
+			"status":   existing.Status,
+		}).Info("Found failed or cancelled video, will retry")
+		return existing, stateRetry, nil
+
+	default:
+		s.logger.WithFields(logrus.Fields{
+			"video_id": existing.ID,
+			"status":   existing.Status,
+		}).Warn("Found video with unknown status, will retry")
+		return existing, stateRetry, nil
+	}
+}
+
+func (s *service) createNewVideo(ctx context.Context, url string) (*models.Video, error) {
+	const op = "VideoService.createNewVideo"
+	logger := s.logger.WithField("url", url)
+
+	// Validate URL
+	if err := s.validator.BasicURLValidation(url); err != nil {
+		logger.WithError(err).Warn("Invalid URL format")
+		return nil, err
+	}
+
+	// Deep validation
+	info, err := s.scripts.Validate(ctx, url)
+	if err != nil {
+		logger.WithError(err).Error("Video validation failed")
+		return nil, errors.InvalidInput(op, err, fmt.Sprintf("Video validation failed: %v", err))
+	}
+
+	if !info.Valid {
+		errMsg := info.Error
+		if errMsg == "" {
+			errMsg = "Invalid video URL (no specific error provided)"
+		}
+		return nil, errors.InvalidInput(op, nil, errMsg)
+	}
+
+	// Create new video record
+	video := &models.Video{
+		ID:        uuid.New().String(),
+		URL:       url,
+		Status:    models.StatusPending,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+		ModelInfo: models.ModelInfo{
+			Name:     s.config.DefaultModel,
+			Duration: info.Duration,
+			FileSize: info.FileSize,
+			Format:   info.Format,
+		},
+	}
+
+	if err := s.repo.Create(ctx, video); err != nil {
+		logger.WithError(err).Error("Failed to create video record")
+		return nil, errors.Internal(op, err, "Failed to create video record")
+	}
+
+	// Start processing
+	s.startProcessing(video)
+	return video, nil
+}
+
+func (s *service) retryVideo(ctx context.Context, video *models.Video) (*models.Video, error) {
+	const op = "VideoService.retryVideo"
+	logger := s.logger.WithField("video_id", video.ID)
+
+	// Reset video state
+	video.Status = models.StatusPending
+	video.Error = ""
+	video.UpdatedAt = time.Now()
+
+	if err := s.repo.Update(ctx, video); err != nil {
+		logger.WithError(err).Error("Failed to update video for retry")
+		return nil, errors.Internal(op, err, "Failed to update video for retry")
+	}
+
+	// Start processing
+	s.startProcessing(video)
+	return video, nil
+}
+
+func (s *service) startProcessing(video *models.Video) {
+	logger := s.logger.WithFields(logrus.Fields{
+		"video_id": video.ID,
+		"url":      video.URL,
+	})
+
+	go func() {
+		processCtx, cancel := context.WithTimeout(context.Background(), s.config.ProcessTimeout)
+		defer cancel()
+
+		logger.Info("Starting background processing")
+
+		if err := s.Process(processCtx, video.ID); err != nil {
+			logger.WithError(err).Error("Background processing failed")
+
+			video.Status = models.StatusFailed
+			video.Error = err.Error()
+			video.UpdatedAt = time.Now()
+
+			if updateErr := s.repo.Update(context.Background(), video); updateErr != nil {
+				logger.WithError(updateErr).Error("Failed to update video status after error")
+			}
+		}
+	}()
 }
 
 func (s *service) Process(ctx context.Context, id string) error {
-    const op = "VideoService.Process"
-    logger := s.logger.WithContext(ctx).WithField("video_id", id)
+	const op = "VideoService.Process"
+	logger := s.logger.WithFields(logrus.Fields{
+		"operation": op,
+		"video_id":  id,
+	})
 
-    // Acquire semaphore
-    select {
-    case s.jobSemaphore <- struct{}{}:
-        defer func() { <-s.jobSemaphore }()
-    case <-ctx.Done():
-        return errors.Internal(op, ctx.Err(), "Context cancelled")
-    case <-s.shutdown:
-        return errors.Internal(op, nil, "Service is shutting down")
-    }
+	logger.Info("Starting video processing")
 
-    // Get video
-    video, err := s.repo.Get(ctx, id)
-    if err != nil {
-        return errors.Internal(op, err, "Failed to get video")
-    }
+	// Get video
+	video, err := s.repo.Get(ctx, id)
+	if err != nil {
+		logger.WithError(err).Error("Failed to get video")
+		return errors.Internal(op, err, "Failed to get video")
+	}
 
-    // Store job in active jobs
-    cancelCtx, cancel := context.WithCancel(ctx)
-    s.activeJobs.Store(id, cancel)
-    defer func() {
-        cancel()
-        s.activeJobs.Delete(id)
-    }()
+	// Update status to processing
+	video.Status = models.StatusProcessing
+	video.UpdatedAt = time.Now()
+	if err := s.repo.Update(ctx, video); err != nil {
+		logger.WithError(err).Error("Failed to update video status")
+		return errors.Internal(op, err, "Failed to update video status")
+	}
 
-    // Update status to processing
-    video.Status = models.StatusProcessing
-    video.UpdatedAt = time.Now()
-    if err := s.repo.Update(ctx, video); err != nil {
-        return errors.Internal(op, err, "Failed to update video status")
-    }
+	// Start transcription
+	logger.Info("Starting transcription process")
+	opts := map[string]string{}
 
-    // Start transcription with progress monitoring
-    opts := map[string]string{
-        "model":    video.ModelInfo.Name,
-        "language": "en",
-    }
+	if video.ModelInfo.Name != "" {
+		opts["model"] = video.ModelInfo.Name
+	}
 
-    result, progress, err := s.scripts.Transcribe(cancelCtx, video.URL, opts)
-    if err != nil {
-        video.Status = models.StatusFailed
-        video.Error = err.Error()
-        video.UpdatedAt = time.Now()
-        _ = s.repo.Update(ctx, video)
-        return errors.Internal(op, err, "Transcription failed")
-    }
+	result, err := s.scripts.Transcribe(ctx, video.URL, opts)
+	if err != nil {
+		logger.WithError(err).Error("Transcription failed")
+		video.Status = models.StatusFailed
+		video.Error = err.Error()
+		video.UpdatedAt = time.Now()
+		_ = s.repo.Update(ctx, video)
+		return errors.Internal(op, err, "Transcription failed")
+	}
 
-    // Monitor progress
-    go func() {
-        for p := range progress {
-            select {
-            case <-cancelCtx.Done():
-                return
-            default:
-                video.Progress = models.Progress{
-                    Percent: p.Percent,
-                    Stage:   p.Stage,
-                    Message: p.Message,
-                }
-                video.UpdatedAt = time.Now()
-                if err := s.repo.Update(ctx, video); err != nil {
-                    logger.WithError(err).Error("Failed to update progress")
-                }
-            }
-        }
-    }()
+	// Update video with transcription result
+	logger.Info("Transcription completed successfully")
+	video.Status = models.StatusCompleted
+	video.Transcription = result.Text
+	video.ModelInfo.Name = result.ModelName
+	video.UpdatedAt = time.Now()
 
-    // Update video with transcription result
-    video.Status = models.StatusCompleted
-    video.Transcription = result.Text
-    video.ModelInfo.Name = result.ModelName
-    video.UpdatedAt = time.Now()
+	if err := s.repo.Update(ctx, video); err != nil {
+		logger.WithError(err).Error("Failed to save transcription")
+		return errors.Internal(op, err, "Failed to save transcription")
+	}
 
-    if err := s.repo.Update(ctx, video); err != nil {
-        return errors.Internal(op, err, "Failed to save transcription")
-    }
-
-    return nil
+	logger.Info("Video processing completed successfully")
+	return nil
 }
 
 func (s *service) Get(ctx context.Context, id string) (*models.Video, error) {
-    const op = "VideoService.Get"
+	const op = "VideoService.Get"
+	logger := s.logger.WithFields(logrus.Fields{
+		"operation": op,
+		"video_id":  id,
+	})
 
-    if id == "" {
-        return nil, errors.InvalidInput(op, nil, "ID is required")
-    }
+	video, err := s.repo.Get(ctx, id)
+	if err != nil {
+		logger.WithError(err).Error("Failed to get video")
+		return nil, errors.Internal(op, err, "Failed to get video")
+	}
 
-    video, err := s.repo.Get(ctx, id)
-    if err != nil {
-        if errors.IsNotFound(err) {
-            return nil, errors.NotFound(op, err, "Video not found")
-        }
-        return nil, errors.Internal(op, err, "Failed to get video")
-    }
-
-    return video, nil
+	return video, nil
 }
 
 func (s *service) GetByURL(ctx context.Context, url string) (*models.Video, error) {
-    const op = "VideoService.GetByURL"
+	const op = "VideoService.GetByURL"
+	logger := s.logger.WithFields(logrus.Fields{
+		"operation": op,
+		"url":       url,
+	})
 
-    if err := s.validator.BasicURLValidation(url); err != nil {
-        return nil, err
-    }
+	video, err := s.repo.GetByURL(ctx, url)
+	if err != nil {
+		logger.WithError(err).Error("Failed to get video by URL")
+		return nil, errors.Internal(op, err, "Failed to get video by URL")
+	}
 
-    video, err := s.repo.GetByURL(ctx, url)
-    if err != nil {
-        if errors.IsNotFound(err) {
-            return nil, errors.NotFound(op, err, "Video not found")
-        }
-        return nil, errors.Internal(op, err, "Failed to get video")
-    }
-
-    return video, nil
+	return video, nil
 }
 
 func (s *service) Cancel(ctx context.Context, id string) error {
-    const op = "VideoService.Cancel"
+	const op = "VideoService.Cancel"
+	logger := s.logger.WithFields(logrus.Fields{
+		"operation": op,
+		"video_id":  id,
+	})
 
-    if id == "" {
-        return errors.InvalidInput(op, nil, "ID is required")
-    }
+	if id == "" {
+		return errors.InvalidInput(op, nil, "ID is required")
+	}
 
-    // Get cancel function from active jobs
-    if cancelFunc, ok := s.activeJobs.Load(id); ok {
-        cancel := cancelFunc.(context.CancelFunc)
-        cancel()
-        s.activeJobs.Delete(id)
+	// Get video
+	video, err := s.repo.Get(ctx, id)
+	if err != nil {
+		logger.WithError(err).Error("Failed to get video")
+		return errors.Internal(op, err, "Failed to get video")
+	}
 
-        // Update video status
-        video, err := s.repo.Get(ctx, id)
-        if err != nil {
-            return errors.Internal(op, err, "Failed to get video")
-        }
+	// Update video status
+	video.Status = models.StatusCancelled
+	video.UpdatedAt = time.Now()
 
-        video.Status = models.StatusCancelled
-        video.UpdatedAt = time.Now()
+	if err := s.repo.Update(ctx, video); err != nil {
+		logger.WithError(err).Error("Failed to update video status")
+		return errors.Internal(op, err, "Failed to update video status")
+	}
 
-        if err := s.repo.Update(ctx, video); err != nil {
-            return errors.Internal(op, err, "Failed to update video status")
-        }
-
-        return nil
-    }
-
-    return errors.NotFound(op, nil, "No active job found for video")
-}
-
-func (s *service) cleanupRoutine() {
-    ticker := time.NewTicker(s.config.CleanupInterval)
-    defer ticker.Stop()
-
-    for {
-        select {
-        case <-s.shutdown:
-            return
-        case <-ticker.C:
-            s.cleanup()
-        }
-    }
-}
-
-func (s *service) cleanup() {
-    ctx := context.Background()
-
-    s.activeJobs.Range(func(key, value interface{}) bool {
-        id := key.(string)
-
-        video, err := s.repo.Get(ctx, id)
-        if err != nil || (video != nil && video.IsStale(s.config.ProcessTimeout)) {
-            if cancel, ok := value.(context.CancelFunc); ok {
-                cancel()
-            }
-            s.activeJobs.Delete(id)
-
-            if video != nil {
-                video.Status = models.StatusFailed
-                video.Error = "Processing timed out"
-                video.UpdatedAt = time.Now()
-                _ = s.repo.Update(ctx, video)
-            }
-        }
-        return true
-    })
+	logger.Info("Video processing cancelled successfully")
+	return nil
 }
 
 func (s *service) Shutdown(ctx context.Context) error {
-    close(s.shutdown)
-
-    // Cancel all active jobs
-    s.activeJobs.Range(func(key, value interface{}) bool {
-        if cancel, ok := value.(context.CancelFunc); ok {
-            cancel()
-        }
-        return true
-    })
-
-    // Wait for jobs to complete or context to cancel
-    select {
-    case <-ctx.Done():
-        return ctx.Err()
-    default:
-        return nil
-    }
+	return nil
 }

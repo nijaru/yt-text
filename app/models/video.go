@@ -2,6 +2,8 @@ package models
 
 import (
 	"time"
+
+	"github.com/sirupsen/logrus"
 )
 
 type Status string
@@ -22,16 +24,8 @@ type Video struct {
 	Summary       string    `json:"summary,omitempty"`
 	ModelInfo     ModelInfo `json:"model_info"`
 	Error         string    `json:"error,omitempty"`
-	Progress      Progress  `json:"progress,omitempty"`
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
-}
-
-type Progress struct {
-	Percent     float64   `json:"percent"`
-	Stage       string    `json:"stage"`
-	Message     string    `json:"message,omitempty"`
-	LastUpdated time.Time `json:"last_updated"`
 }
 
 type ModelInfo struct {
@@ -52,7 +46,6 @@ func NewVideo(url string) *Video {
 		URL:       url,
 		Status:    StatusPending,
 		ModelInfo: DefaultModelInfo(),
-		Progress:  Progress{Percent: 0, Stage: "initialized"},
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
@@ -80,21 +73,24 @@ func (v *Video) IsStale(timeout time.Duration) bool {
 	if v.Status != StatusProcessing {
 		return false
 	}
-	return time.Since(v.Progress.LastUpdated) > timeout
+	timeSinceUpdate := time.Since(v.UpdatedAt)
+	isStale := timeSinceUpdate > timeout
+	if isStale {
+		log := logrus.WithFields(logrus.Fields{
+			"video_id":          v.ID,
+			"status":            v.Status,
+			"updated_at":        v.UpdatedAt,
+			"time_since_update": timeSinceUpdate,
+			"timeout":           timeout,
+		})
+		log.Info("Video is considered stale")
+	}
+	return isStale
 }
 
 // Update methods
 func (v *Video) UpdateStatus(status Status) {
 	v.Status = status
-	v.UpdatedAt = time.Now()
-}
-
-func (v *Video) UpdateProgress(percent float64, stage string) {
-	v.Progress = Progress{
-		Percent:     percent,
-		Stage:       stage,
-		LastUpdated: time.Now(),
-	}
 	v.UpdatedAt = time.Now()
 }
 

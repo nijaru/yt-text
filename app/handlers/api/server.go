@@ -83,6 +83,19 @@ func (s *Server) Shutdown(ctx context.Context) error {
 func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
 
+	// Serve static files first
+	mux.Handle("/static/", http.FileServer(http.Dir("."))) // Changed this line
+
+	// Root handler for index.html
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/" {
+			http.ServeFile(w, r, "static/index.html")
+			return
+		}
+		// 404 for any other paths not handled by other routes
+		http.NotFound(w, r)
+	})
+
 	// API v1 routes
 	s.addV1Routes(mux)
 

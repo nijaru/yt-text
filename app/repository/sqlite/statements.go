@@ -12,19 +12,19 @@ const (
 	createVideoQuery = `
         INSERT INTO videos (
             id, url, status, transcription, summary,
-            model_info, error, progress, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            model_info, error, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `
 
 	getVideoQuery = `
         SELECT id, url, status, transcription, summary,
-               model_info, error, progress, created_at, updated_at
+               model_info, error, created_at, updated_at
         FROM videos WHERE id = ?
     `
 
 	getVideoByURLQuery = `
         SELECT id, url, status, transcription, summary,
-               model_info, error, progress, created_at, updated_at
+               model_info, error, created_at, updated_at
         FROM videos WHERE url = ?
     `
 
@@ -35,7 +35,6 @@ const (
             summary = ?,
             model_info = ?,
             error = ?,
-            progress = ?,
             updated_at = ?
         WHERE id = ?
     `
@@ -46,7 +45,7 @@ const (
 
 	getStaleJobsQuery = `
         SELECT id, url, status, transcription, summary,
-               model_info, error, progress, created_at, updated_at
+               model_info, error, created_at, updated_at
         FROM videos
         WHERE status = ? AND updated_at < ?
     `

@@ -23,7 +23,6 @@ CREATE TABLE IF NOT EXISTS videos (
     summary TEXT,
     model_info JSON NOT NULL,
     error TEXT,
-    progress JSON NOT NULL,
     created_at DATETIME NOT NULL,
     updated_at DATETIME NOT NULL
 );
