@@ -1,9 +1,11 @@
 import argparse
+import contextlib
 import json
 import os
 import sys
 import tempfile
 import time
+import typing
 
 import torch
 import yt_dlp
@@ -138,24 +140,31 @@ class Transcriber:
             raise TranscriptionError(f"Transcription failed: {e}")
 
 
+@contextlib.contextmanager
+def redirect_stdout_to_stderr() -> typing.Iterator[None]:
+    """Temporarily redirect stdout to stderr."""
+    old_stdout = sys.stdout
+    sys.stdout = sys.stderr
+    try:
+        yield
+    finally:
+        sys.stdout = old_stdout
+
+
 def main():
     parser = argparse.ArgumentParser(description="Transcribe YouTube video")
-    parser.add_argument("url", help="YouTube URL")
+    parser.add_argument("--url", type=str, required=True, help="URL to validate")
     parser.add_argument("--model", default="base.en", help="Whisper model to use")
     parser.add_argument("--json", action="store_true", help="Output in JSON format")
     args = parser.parse_args()
 
     try:
-        transcriber = Transcriber(args.url, args.model)
-        result = transcriber.process()
+        with redirect_stdout_to_stderr():
+            transcriber = Transcriber(args.url, args.model)
+            result = transcriber.process()
 
-        if args.json:
-            print(json.dumps(result))
-        else:
-            if result.get("error"):
-                print(f"Error: {result['error']}", file=sys.stderr)
-                sys.exit(1)
-            print(result["text"])
+        # stdout is automatically restored here
+        print(json.dumps(result))
 
     except Exception as e:
         error_response = {
@@ -164,10 +173,7 @@ def main():
             "model_name": args.model,
             "duration": 0,
         }
-        if args.json:
-            print(json.dumps(error_response))
-        else:
-            print(f"Error: {str(e)}", file=sys.stderr)
+        print(json.dumps(error_response))
         sys.exit(1)
 
 

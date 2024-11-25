@@ -38,23 +38,30 @@ document
         `;
 
 		try {
-			const formData = new FormData();
+			const formData = new URLSearchParams();
 			formData.append("url", url);
 
-			// Start transcription
 			const response = await fetch("/api/v1/transcribe", {
 				method: "POST",
+				headers: {
+					"Content-Type": "application/x-www-form-urlencoded",
+				},
 				body: formData,
 			});
 
-			const data = await response.json();
+			const responseData = await response.json();
 
 			if (!response.ok) {
-				throw new Error(data.error || "Failed to process video");
+				throw new Error(responseData.error || "Failed to process video");
+			}
+
+			const videoId = responseData.data.id;
+			if (!videoId) {
+				throw new Error("No video ID received from server");
 			}
 
 			// Poll for status
-			await pollTranscriptionStatus(data.id, statusDiv, responseDiv);
+			await pollTranscriptionStatus(videoId, statusDiv, responseDiv);
 		} catch (error) {
 			statusDiv.classList.add("hidden");
 			responseDiv.innerHTML = `
@@ -74,11 +81,13 @@ async function pollTranscriptionStatus(id, statusDiv, responseDiv) {
 	while (attempts < maxAttempts) {
 		try {
 			const response = await fetch(`/api/v1/transcribe/${id}`);
-			const data = await response.json();
+			const responseData = await response.json();
 
 			if (!response.ok) {
-				throw new Error(data.error || "Failed to check status");
+				throw new Error(responseData.error || "Failed to check status");
 			}
+
+			const data = responseData.data;
 
 			if (data.status === "completed") {
 				// Hide status and show result

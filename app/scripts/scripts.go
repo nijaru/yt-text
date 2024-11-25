@@ -120,21 +120,14 @@ func (r *ScriptRunner) runScript(ctx context.Context, scriptName string, args ma
 
 	// Build command with args
 	cmdArgs := []string{"run", scriptPath}
-
-	// Special handling for URL argument in transcribe.py
-	if url, hasURL := args["url"]; hasURL && scriptName == "transcribe.py" {
-		cmdArgs = append(cmdArgs, url)
-		delete(args, "url")
-	}
-
-	// Add remaining arguments as named flags
 	for k, v := range args {
 		if v != "" {
-			cmdArgs = append(cmdArgs, fmt.Sprintf("--%s=%s", k, v))
+			cmdArgs = append(cmdArgs, fmt.Sprintf("--%s", k), v)
 		}
 	}
 	cmdArgs = append(cmdArgs, "--json")
 
+	// Correctly pass command and arguments
 	cmd := exec.CommandContext(ctx, "uv", cmdArgs...)
 	cmd.Dir = r.config.ScriptsPath
 	cmd.Env = append(os.Environ(),
@@ -149,11 +142,7 @@ func (r *ScriptRunner) runScript(ctx context.Context, scriptName string, args ma
 	err := cmd.Run()
 	if err != nil {
 		stderrOutput := stderr.String()
-		logger.WithFields(logrus.Fields{
-			"error":  err,
-			"stderr": stderrOutput,
-			"stdout": stdout.String(),
-		}).Error("Script execution failed")
+		logger.WithError(err).Error("Script execution failed")
 		return nil, fmt.Errorf("script execution failed: %v (stderr: %s)", err, stderrOutput)
 	}
 

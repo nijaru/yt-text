@@ -18,7 +18,7 @@ func NewValidator(cfg *config.Config) *Validator {
 	return &Validator{config: cfg}
 }
 
-// ValidateURL performs URL validation
+// ValidateURL performs basic URL validation and YouTube-specific checks
 func (v *Validator) ValidateURL(urlStr string) error {
 	const op = "Validator.ValidateURL"
 
@@ -26,6 +26,7 @@ func (v *Validator) ValidateURL(urlStr string) error {
 		return errors.InvalidInput(op, nil, "URL is required")
 	}
 
+	// Parse URL
 	parsedURL, err := url.Parse(urlStr)
 	if err != nil {
 		return errors.InvalidInput(op, err, "Invalid URL format")
@@ -36,10 +37,53 @@ func (v *Validator) ValidateURL(urlStr string) error {
 		return errors.InvalidInput(op, nil, "URL must use HTTP or HTTPS")
 	}
 
-	// Domain validation
-	host := parsedURL.Hostname()
-	if !strings.Contains(host, "youtube.com") && !strings.Contains(host, "youtu.be") {
-		return errors.InvalidInput(op, nil, "Only YouTube URLs are supported")
+	// If it's a YouTube URL, perform additional validation
+	if isYouTubeDomain(parsedURL.Hostname()) {
+		if err := v.validateYouTubeURL(parsedURL); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// isYouTubeDomain checks if the hostname is a valid YouTube domain
+func isYouTubeDomain(host string) bool {
+	validDomains := []string{
+		"youtube.com",
+		"www.youtube.com",
+		"youtu.be",
+	}
+
+	for _, domain := range validDomains {
+		if host == domain {
+			return true
+		}
+	}
+	return false
+}
+
+// validateYouTubeURL performs YouTube-specific URL validation
+func (v *Validator) validateYouTubeURL(parsedURL *url.URL) error {
+	const op = "Validator.validateYouTubeURL"
+
+	// Handle youtu.be format
+	if parsedURL.Host == "youtu.be" {
+		if parsedURL.Path == "" || parsedURL.Path == "/" {
+			return errors.InvalidInput(op, nil, "Invalid YouTube short URL format")
+		}
+		return nil
+	}
+
+	// Handle youtube.com format
+	if parsedURL.Path != "/watch" {
+		return errors.InvalidInput(op, nil, "Invalid YouTube URL format")
+	}
+
+	query := parsedURL.Query()
+	videoID := query.Get("v")
+	if videoID == "" {
+		return errors.InvalidInput(op, nil, "Missing YouTube video ID")
 	}
 
 	return nil
@@ -72,7 +116,8 @@ func (v *Validator) ValidateRequest(r *http.Request, opts RequestValidationOpts)
 
 	// Content type validation
 	if opts.RequireJSON {
-		if contentType := r.Header.Get("Content-Type"); !strings.Contains(contentType, "application/json") {
+		contentType := r.Header.Get("Content-Type")
+		if !strings.Contains(contentType, "application/json") {
 			return errors.InvalidInput(op, nil, "Content-Type must be application/json")
 		}
 	}
