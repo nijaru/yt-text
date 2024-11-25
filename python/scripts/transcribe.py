@@ -112,17 +112,21 @@ class Transcriber:
                 download_root="/tmp/models",
             )
 
-            # Transcribe
+            # Transcribe with optimized parameters
             start_time = time.time()
             segments, info = model.transcribe(
                 audio_path,
-                beam_size=5,
+                beam_size=3,
+                temperature=0.2,
+                best_of=1,
+                condition_on_previous_text=True,
                 vad_filter=True,
                 vad_parameters=dict(min_silence_duration_ms=500),
+                language="en",
             )
 
             # Process segments
-            segments = list(segments)  # Convert generator to list
+            segments = list(segments)
             if not segments:
                 raise TranscriptionError("No speech detected")
 
