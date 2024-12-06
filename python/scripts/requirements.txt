@@ -1,0 +1,5 @@
+faster-whisper
+torch
+yt_dlp
+pydub
+argparse
