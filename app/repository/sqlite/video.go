@@ -3,9 +3,8 @@ package sqlite
 import (
 	"context"
 	"database/sql"
-
-	"github.com/nijaru/yt-text/errors"
-	"github.com/nijaru/yt-text/models"
+	"yt-text/errors"
+	"yt-text/models"
 )
 
 type SQLiteRepository struct {
@@ -38,7 +37,6 @@ func (r *SQLiteRepository) Save(ctx context.Context, video *models.Video) error 
 		video.CreatedAt,
 		video.UpdatedAt,
 	)
-
 	if err != nil {
 		return errors.Internal(op, err, "Failed to save video")
 	}

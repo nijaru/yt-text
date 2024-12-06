@@ -3,13 +3,13 @@ package video
 import (
 	"context"
 	"time"
+	"yt-text/errors"
+	"yt-text/models"
+	"yt-text/repository"
+	"yt-text/scripts"
+	"yt-text/validation"
 
 	"github.com/google/uuid"
-	"github.com/nijaru/yt-text/errors"
-	"github.com/nijaru/yt-text/models"
-	"github.com/nijaru/yt-text/repository"
-	"github.com/nijaru/yt-text/scripts"
-	"github.com/nijaru/yt-text/validation"
 	"github.com/sirupsen/logrus"
 )
 

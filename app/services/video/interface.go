@@ -3,8 +3,7 @@ package video
 import (
 	"context"
 	"time"
-
-	"github.com/nijaru/yt-text/models"
+	"yt-text/models"
 )
 
 type Service interface {

@@ -2,8 +2,7 @@ package repository
 
 import (
 	"context"
-
-	"github.com/nijaru/yt-text/models"
+	"yt-text/models"
 )
 
 type VideoRepository interface {

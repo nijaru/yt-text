@@ -7,8 +7,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/pkg/errors"
 )
 
 type Config struct {
@@ -22,6 +20,9 @@ type Config struct {
 	// Application paths
 	LogDir  string `json:"log_dir"`
 	TempDir string `json:"temp_dir"`
+
+	// Middleware settings
+	Middleware MiddlewareConfig `json:"middleware"`
 
 	// CORS Configuration
 	CORS CORSConfig `json:"cors"`
@@ -41,6 +42,18 @@ type Config struct {
 	// Request and shutdown timeouts
 	RequestTimeout  time.Duration `json:"request_timeout"`
 	ShutdownTimeout time.Duration `json:"shutdown_timeout"`
+}
+
+type MiddlewareConfig struct {
+	EnableRecover   bool `json:"enable_recover"`
+	EnableRequestID bool `json:"enable_request_id"`
+	EnableLogger    bool `json:"enable_logger"`
+	EnableTimeout   bool `json:"enable_timeout"`
+	EnableCORS      bool `json:"enable_cors"`
+	EnableRateLimit bool `json:"enable_rate_limit"`
+	EnableCompress  bool `json:"enable_compress"`
+	EnableETag      bool `json:"enable_etag"`
+	EnableDebugMode bool `json:"enable_debug_mode"`
 }
 
 type DatabaseConfig struct {
@@ -74,6 +87,35 @@ type RateLimitConfig struct {
 	Enabled           bool `json:"enabled"`
 	RequestsPerMinute int  `json:"requests_per_minute"`
 	BurstSize         int  `json:"burst_size"`
+}
+
+// Default configurations
+func defaultDevConfig() MiddlewareConfig {
+	return MiddlewareConfig{
+		EnableRecover:   true,
+		EnableRequestID: true,
+		EnableLogger:    true,
+		EnableTimeout:   false, // Disabled for easier debugging
+		EnableCORS:      true,
+		EnableRateLimit: false, // Disabled for testing
+		EnableCompress:  false, // Not needed for development
+		EnableETag:      false, // Not needed for development
+		EnableDebugMode: true,
+	}
+}
+
+func defaultProdConfig() MiddlewareConfig {
+	return MiddlewareConfig{
+		EnableRecover:   true,
+		EnableRequestID: true,
+		EnableLogger:    true,
+		EnableTimeout:   true,
+		EnableCORS:      true,
+		EnableRateLimit: true,
+		EnableCompress:  true,
+		EnableETag:      true,
+		EnableDebugMode: false,
+	}
 }
 
 // Load reads configuration from environment variables
@@ -133,6 +175,13 @@ func Load() (*Config, error) {
 			PythonPath:   getEnv("PYTHON_PATH", "python3"),
 			ScriptsPath:  getEnv("SCRIPTS_PATH", "./scripts"),
 		},
+
+		// Middleware
+		Middleware: defaultDevConfig(),
+	}
+
+	if os.Getenv("ENV") == "production" {
+		cfg.Middleware = defaultProdConfig()
 	}
 
 	// Validate configuration
@@ -178,21 +227,18 @@ func validatePaths(c *Config) error {
 
 func validateTimeouts(c *Config) error {
 	if c.ReadTimeout <= 0 {
-		return errors.New("read timeout must be positive")
+		return fmt.Errorf("read timeout must be positive")
 	}
 	if c.WriteTimeout <= 0 {
-		return errors.New("write timeout must be positive")
+		return fmt.Errorf("write timeout must be positive")
 	}
 	return nil
 }
 
 func validateServices(c *Config) error {
 	if c.Video.MaxDuration <= 0 {
-		return errors.New("max video duration must be positive")
+		return fmt.Errorf("max video duration must be positive")
 	}
-	// if c.Video.MaxFileSize <= 0 {
-	// 	return errors.New("max file size must be positive")
-	// }
 	return nil
 }
 

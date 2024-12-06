@@ -5,67 +5,31 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/sirupsen/logrus"
+	fiberLogger "github.com/gofiber/fiber/v2/middleware/logger"
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
-// Common field keys
-const (
-	FieldRequestID = "request_id"
-	FieldURL       = "url"
-	FieldMethod    = "method"
-	FieldPath      = "path"
-	FieldDuration  = "duration"
-	FieldStatus    = "status"
-	FieldError     = "error"
-)
-
-// InitLogger initializes the logger with the given configuration
-func InitLogger(logDir string) error {
+func NewLogger(logDir string) (*fiberLogger.Config, error) {
 	if err := os.MkdirAll(logDir, os.ModePerm); err != nil {
-		return err
+		return nil, err
 	}
 
-	logFile := filepath.Join(logDir, "app.log")
-	fileLogger := &lumberjack.Logger{
-		Filename:   logFile,
-		MaxSize:    10, // megabytes
+	logFile := &lumberjack.Logger{
+		Filename:   filepath.Join(logDir, "app.log"),
+		MaxSize:    10,
 		MaxBackups: 3,
-		MaxAge:     28,   // days
-		Compress:   true, // disabled by default
+		MaxAge:     28,
+		Compress:   true,
 	}
 
-	// Create a multi-writer for both stdout and file
-	multiWriter := io.MultiWriter(os.Stdout, fileLogger)
+	multiWriter := io.MultiWriter(os.Stdout, logFile)
 
-	// Configure logrus
-	logrus.SetOutput(multiWriter)
-	logrus.SetFormatter(&logrus.JSONFormatter{
-		FieldMap: logrus.FieldMap{
-			logrus.FieldKeyTime:  "timestamp",
-			logrus.FieldKeyLevel: "level",
-			logrus.FieldKeyMsg:   "message",
-		},
-	})
-
-	// Set log level based on environment
-	if os.Getenv("ENV") == "production" {
-		logrus.SetLevel(logrus.InfoLevel)
-	} else {
-		logrus.SetLevel(logrus.DebugLevel)
+	config := &fiberLogger.Config{
+		Output:     multiWriter,
+		Format:     "${time} | ${status} | ${latency} | ${method} | ${path} | ${error}\n",
+		TimeFormat: "2006-01-02 15:04:05",
+		TimeZone:   "Local",
 	}
 
-	return nil
-}
-
-// WithRequestID returns a logrus entry with request ID field
-func WithRequestID(requestID string) *logrus.Entry {
-	return logrus.WithField(FieldRequestID, requestID)
-}
-
-// SanitizeURL removes sensitive information from URLs before logging
-func SanitizeURL(url string) string {
-	// Implement URL sanitization logic here
-	// For example, remove API keys, tokens, or other sensitive data
-	return url
+	return config, nil
 }

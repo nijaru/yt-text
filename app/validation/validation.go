@@ -5,9 +5,8 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-
-	"github.com/nijaru/yt-text/config"
-	"github.com/nijaru/yt-text/errors"
+	"yt-text/config"
+	"yt-text/errors"
 )
 
 type Validator struct {

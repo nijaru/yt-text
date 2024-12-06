@@ -41,7 +41,7 @@ document
 			const formData = new URLSearchParams();
 			formData.append("url", url);
 
-			const response = await fetch("/api/v1/transcribe", {
+			const response = await fetch("/api/transcribe", {
 				method: "POST",
 				headers: {
 					"Content-Type": "application/x-www-form-urlencoded",
@@ -80,7 +80,7 @@ async function pollTranscriptionStatus(id, statusDiv, responseDiv) {
 
 	while (attempts < maxAttempts) {
 		try {
-			const response = await fetch(`/api/v1/transcribe/${id}`);
+			const response = await fetch(`/api/transcribe/${id}`);
 			const responseData = await response.json();
 
 			if (!response.ok) {

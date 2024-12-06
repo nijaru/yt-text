@@ -3,7 +3,6 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.prod
-      target: runner
       args:
         GOMEMLIMIT: 1024MiB
         GOGC: 10
@@ -11,6 +10,8 @@ services:
     image: yt-text:${TAG:-latest}
     environment:
       # Server Configuration
+      - ENV=production
+      - DEBUG=false
       - DB_PATH=/tmp/urls.db
       - SERVER_PORT=8080
       - READ_TIMEOUT=30s
@@ -39,6 +40,17 @@ services:
       - GOMAXPROCS=1
       - GOGC=10
       - OOM_SCORE_ADJ=500
+
+      # Middleware Configuration
+      - MIDDLEWARE_ENABLE_RECOVER=true
+      - MIDDLEWARE_ENABLE_REQUEST_ID=true
+      - MIDDLEWARE_ENABLE_LOGGER=true
+      - MIDDLEWARE_ENABLE_TIMEOUT=true
+      - MIDDLEWARE_ENABLE_CORS=true
+      - MIDDLEWARE_ENABLE_RATE_LIMIT=true
+      - MIDDLEWARE_ENABLE_COMPRESS=true
+      - MIDDLEWARE_ENABLE_ETAG=true
+      - MIDDLEWARE_ENABLE_DEBUG_MODE=false
 
     restart: unless-stopped
     security_opt:

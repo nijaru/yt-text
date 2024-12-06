@@ -10,14 +10,15 @@ RUN go mod download
 COPY app/ ./
 RUN go build -o /bin/main .
 
-FROM python:3.12-slim-bookworm AS runner
+FROM python:3.12-slim-bookworm
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app \
     VIRTUAL_ENV=/app/.venv \
     PATH="/app/.venv/bin:$PATH" \
-    UV_CACHE_DIR=/tmp/uv-cache
+    UV_CACHE_DIR=/tmp/uv-cache \
+    GO_ENV=development
 
 # Install required system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \

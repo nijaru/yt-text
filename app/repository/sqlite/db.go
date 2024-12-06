@@ -8,9 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"yt-text/errors"
 
 	_ "github.com/mattn/go-sqlite3"
-	"github.com/nijaru/yt-text/errors"
 )
 
 // Removing the embed FS since we'll manage schema differently
@@ -128,7 +128,11 @@ func execSchema(db *sql.DB) error {
 		}
 
 		if _, err := tx.Exec(stmt); err != nil {
-			return errors.Internal(op, err, fmt.Sprintf("failed to execute schema statement: %s", stmt))
+			return errors.Internal(
+				op,
+				err,
+				fmt.Sprintf("failed to execute schema statement: %s", stmt),
+			)
 		}
 	}
 

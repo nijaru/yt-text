@@ -4,8 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-
-	"github.com/nijaru/yt-text/errors"
+	"yt-text/errors"
 )
 
 const (

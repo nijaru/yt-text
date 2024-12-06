@@ -2,9 +2,9 @@ services:
   app:
     build:
       context: .
-      target: runner
     image: yt-text:latest
     environment:
+      - ENV=development
       - SERVER_PORT=8080
       - READ_TIMEOUT=30s
       - WRITE_TIMEOUT=60s
@@ -17,11 +17,19 @@ services:
       - SCRIPTS_PATH=/app/scripts
       - VIDEO_PROCESS_TIMEOUT=30m
       - VIDEO_MAX_DURATION=4h
-      - VIDEO_MAX_FILE_SIZE=104857600
       - WHISPER_MODEL=base.en
       - PYTHON_PATH=/app/.venv/bin/python
       - PYTHONDONTWRITEBYTECODE=1
       - PYTHONUNBUFFERED=1
+      - MIDDLEWARE_ENABLE_RECOVER=true
+      - MIDDLEWARE_ENABLE_REQUEST_ID=true
+      - MIDDLEWARE_ENABLE_LOGGER=true
+      - MIDDLEWARE_ENABLE_TIMEOUT=false
+      - MIDDLEWARE_ENABLE_CORS=true
+      - MIDDLEWARE_ENABLE_RATE_LIMIT=false
+      - MIDDLEWARE_ENABLE_COMPRESS=false
+      - MIDDLEWARE_ENABLE_ETAG=false
+      - MIDDLEWARE_ENABLE_DEBUG_MODE=true
     ports:
       - "8080:8080"
     tmpfs:
