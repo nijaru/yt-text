@@ -1,6 +1,5 @@
 import argparse
 import json
-import os
 import sys
 import traceback
 
@@ -10,7 +9,12 @@ MAX_VIDEO_DURATION = 4 * 3600  # 4 hours in seconds
 
 
 def validate_url(url: str) -> dict:
-    result = {"valid": False, "duration": 0, "file_size": 0, "format": "", "error": ""}
+    result = {
+        "valid": False,
+        "duration": 0,
+        "format": "",
+        "error": "",
+    }
 
     try:
         with yt_dlp.YoutubeDL({"quiet": True}) as ydl:
@@ -19,9 +23,11 @@ def validate_url(url: str) -> dict:
             duration = info.get("duration", 0)
             if duration > MAX_VIDEO_DURATION:
                 result["error"] = (
-                    f"Video too long: {duration} seconds (max: {MAX_VIDEO_DURATION})"
+                    f"Video too long: {duration} seconds (max: {MAX_VIDEO_DURATION} seconds)"
                 )
                 return result
+
+            # Additional validation can be added here (e.g., supported formats)
 
             result.update(
                 {
@@ -31,27 +37,20 @@ def validate_url(url: str) -> dict:
                 }
             )
 
+    except yt_dlp.utils.DownloadError as e:
+        result["error"] = f"Download error: {str(e)}"
     except Exception as e:
-        result["error"] = str(e)
+        result["error"] = f"Unexpected error: {str(e)}"
 
     return result
 
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Validate YouTube URL")
+def main():
+    parser = argparse.ArgumentParser(description="Validate Media URL")
     parser.add_argument("--url", type=str, required=True, help="URL to validate")
-    parser.add_argument("--json", action="store_true", help="Output in JSON format")
     args = parser.parse_args()
 
     try:
-        print(f"Starting validation for URL: {args.url}", file=sys.stderr)
-        print(
-            f"Script directory: {os.path.dirname(os.path.abspath(__file__))}",
-            file=sys.stderr,
-        )
-        print(f"Current working directory: {os.getcwd()}", file=sys.stderr)
-        print(f"Environment: {os.environ}", file=sys.stderr)
-
         result = validate_url(args.url)
         print(json.dumps(result))
 
@@ -62,3 +61,7 @@ if __name__ == "__main__":
         print(f"Critical error: {str(e)}", file=sys.stderr)
         print(traceback.format_exc(), file=sys.stderr)
         sys.exit(2)
+
+
+if __name__ == "__main__":
+    main()

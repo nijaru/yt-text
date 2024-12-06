@@ -8,10 +8,6 @@ import yt_dlp
 from faster_whisper import WhisperModel
 from pydub import AudioSegment
 
-# Default Constraints (can be overridden)
-DEFAULT_MAX_VIDEO_DURATION = 4 * 3600  # 4 hours in seconds
-DEFAULT_MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB
-
 
 class TranscriptionError(Exception):
     """Base exception for transcription errors"""
@@ -44,17 +40,21 @@ class Transcriber:
         )
 
     def process_url(self, url: str) -> Dict:
-        """Process a single YouTube URL and return transcription result."""
+        """Process a single URL and return transcription result."""
         try:
             with tempfile.TemporaryDirectory() as temp_dir:
-                # Download audio
-                audio_path = self._download_audio(url, temp_dir)
+                # Download audio and retrieve media title
+                audio_path, media_title = self._download_audio(url, temp_dir)
 
                 # Process audio
                 processed_audio_path = self._process_audio(audio_path)
 
                 # Transcribe
                 transcription = self._transcribe(processed_audio_path)
+
+                # Include title and URL in the result
+                transcription["title"] = media_title
+                transcription["url"] = url
 
                 return transcription
 
@@ -64,6 +64,8 @@ class Transcriber:
                 "text": None,
                 "model_name": self.model_name,
                 "duration": 0,
+                "title": None,
+                "url": url,
             }
         except Exception as e:
             return {
@@ -71,10 +73,12 @@ class Transcriber:
                 "text": None,
                 "model_name": self.model_name,
                 "duration": 0,
+                "title": None,
+                "url": url,
             }
 
-    def _download_audio(self, url: str, temp_dir: str) -> str:
-        """Download audio from YouTube URL."""
+    def _download_audio(self, url: str, temp_dir: str) -> (str, str):
+        """Download audio from URL and retrieve media title."""
         ydl_opts = {
             "format": "bestaudio/best",
             "outtmpl": os.path.join(temp_dir, "%(id)s.%(ext)s"),
@@ -88,22 +92,31 @@ class Transcriber:
                 # Extract info without downloading
                 info = ydl.extract_info(url, download=False)
 
+                # Retrieve media title
+                media_title = info.get("title")
+                if not media_title:
+                    # Use URL as title if no title is provided
+                    media_title = url
+
                 # Validate duration if constraint is set
                 duration = info.get("duration", 0)
                 if self.max_video_duration and duration > self.max_video_duration:
                     raise TranscriptionError(
-                        f"Video duration ({duration}s) exceeds maximum allowed ({self.max_video_duration}s)"
+                        f"Media duration ({duration}s) exceeds maximum allowed ({self.max_video_duration}s)"
                     )
 
                 # Download audio
                 info = ydl.extract_info(url, download=True)
                 downloaded_file = ydl.prepare_filename(info)
+
+                # Handle file size constraints
                 file_size = os.path.getsize(downloaded_file)
                 if self.max_file_size and file_size > self.max_file_size:
                     raise TranscriptionError(
                         f"Downloaded file size ({file_size} bytes) exceeds maximum allowed ({self.max_file_size} bytes)"
                     )
-                return downloaded_file
+
+                return downloaded_file, media_title
 
         except TranscriptionError:
             raise

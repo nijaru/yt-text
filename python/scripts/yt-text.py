@@ -1,5 +1,8 @@
 import argparse
+import hashlib
+import re
 from pathlib import Path
+from urllib.parse import urlparse
 
 import torch
 from transcription import Transcriber
@@ -23,6 +26,61 @@ def format_transcript(text: str) -> str:
     return "\n".join(formatted_lines)
 
 
+def sanitize_filename(name: str) -> str:
+    """
+    Sanitize the filename by removing or replacing invalid characters and limiting its length.
+
+    Args:
+        name (str): The original filename.
+
+    Returns:
+        str: A sanitized filename safe for most filesystems.
+    """
+    # Remove any character that is not alphanumeric, space, hyphen, or underscore
+    sanitized = re.sub(r'[<>:"/\\|?*]', "", name)
+    sanitized = sanitized.strip().replace(" ", "_")
+    # Limit filename length to 100 characters
+    return sanitized[:100] if len(sanitized) > 100 else sanitized
+
+
+def generate_short_unique_identifier(url: str, length: int = 8) -> str:
+    """
+    Generate a short unique identifier based on the URL.
+
+    Args:
+        url (str): The media URL.
+        length (int): Desired length of the unique identifier.
+
+    Returns:
+        str: A shortened unique identifier string.
+    """
+    # Use a hash of the URL and take the first 'length' characters
+    return hashlib.md5(url.encode("utf-8")).hexdigest()[:length]
+
+
+def extract_root_domain(url: str) -> str:
+    """
+    Extract the root domain from a URL.
+
+    Args:
+        url (str): The media URL.
+
+    Returns:
+        str: The root domain (e.g., 'instagram' from 'instagram.com/post/xyz').
+    """
+    try:
+        parsed_url = urlparse(url)
+        domain = parsed_url.netloc.lower()
+        # Remove 'www.' prefix if present
+        if domain.startswith("www."):
+            domain = domain[4:]
+        # Extract the first part of the domain
+        root_domain = domain.split(".")[0]
+        return root_domain
+    except Exception:
+        return "media"
+
+
 def process_urls(
     urls: list, audio_dir: Path, transcripts_dir: Path, transcriber: Transcriber
 ):
@@ -30,7 +88,7 @@ def process_urls(
     for url in urls:
         try:
             print(f"Processing URL: {url}")
-            # Transcribe audio
+            # Process URL and get transcription result
             result = transcriber.process_url(url)
             if result.get("error"):
                 print(f"Error processing {url}: {result['error']}")
@@ -39,9 +97,17 @@ def process_urls(
             # Format transcription
             formatted_text = format_transcript(result["text"])
 
-            # Determine video ID for file naming
-            video_id = extract_video_id(url)
-            transcript_filename = f"{video_id}.txt"
+            # Extract media title for file naming
+            media_title = result.get("title")
+            if media_title and media_title.lower() != url.lower():
+                sanitized_title = sanitize_filename(media_title)
+            else:
+                # Fallback: Use root domain with short unique identifier
+                root_domain = extract_root_domain(url)
+                short_hash = generate_short_unique_identifier(url)
+                sanitized_title = f"{root_domain}_{short_hash}"
+
+            transcript_filename = f"{sanitized_title}.txt"
             transcript_path = transcripts_dir / transcript_filename
             with transcript_path.open("w", encoding="utf-8") as f:
                 f.write(formatted_text)
@@ -52,28 +118,19 @@ def process_urls(
             continue
 
 
-def extract_video_id(url: str) -> str:
-    """Extracts the video ID from a YouTube URL."""
-    from urllib.parse import parse_qs, urlparse
-
-    parsed_url = urlparse(url)
-    if parsed_url.hostname in ["youtu.be"]:
-        return parsed_url.path[1:]
-    elif parsed_url.hostname in ["www.youtube.com", "youtube.com"]:
-        query = parse_qs(parsed_url.query)
-        return query.get("v", "")[0]
-    else:
-        return url  # Fallback to the full URL if parsing fails
-
-
 def main():
-    parser = argparse.ArgumentParser(
-        description="Download and transcribe YouTube videos"
-    )
+    parser = argparse.ArgumentParser(description="Download and transcribe media")
     parser.add_argument(
         "urls",
         nargs="+",
-        help="YouTube video URL(s). Can be individual URLs or comma-separated lists.",
+        help="Media URL(s). Can be individual URLs or comma-separated lists.",
+    )
+    # Add the --model argument here
+    parser.add_argument(
+        "--model",
+        type=str,
+        default="base.en",
+        help="Whisper model to use for transcription (e.g., 'base.en', 'small', 'medium', 'large').",
     )
     args = parser.parse_args()
 
@@ -88,7 +145,7 @@ def main():
 
     # Set up directories in the current working directory
     cwd = Path.cwd()
-    transcripts_parent_dir = cwd / "youtube_transcripts"
+    transcripts_parent_dir = cwd / "media_transcripts"
     audio_dir = transcripts_parent_dir / "audio"
     transcripts_dir = transcripts_parent_dir / "transcripts"
 
@@ -96,10 +153,10 @@ def main():
     audio_dir.mkdir(parents=True, exist_ok=True)
     transcripts_dir.mkdir(parents=True, exist_ok=True)
 
-    # Initialize Transcriber without constraints
+    # Initialize Transcriber with the specified model
     device = "cuda" if torch.cuda.is_available() else "cpu"
     transcriber = Transcriber(
-        model_name="base.en",
+        model_name=args.model,  # Use the model name from the argument
         device=device,
         compute_type="float16" if device == "cuda" else "float32",
         max_video_duration=None,  # No constraints
