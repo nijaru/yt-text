@@ -23,9 +23,9 @@ type Config struct {
 type VideoInfo struct {
 	Valid    bool    `json:"valid"`
 	Duration float64 `json:"duration"`
-	FileSize int64   `json:"file_size"`
-	Format   string  `json:"format"`
-	Error    string  `json:"error,omitempty"`
+	// FileSize int64   `json:"file_size"`
+	Format string `json:"format"`
+	Error  string `json:"error,omitempty"`
 }
 
 type TranscriptionResult struct {
@@ -33,6 +33,8 @@ type TranscriptionResult struct {
 	ModelName string  `json:"model_name"`
 	Duration  float64 `json:"duration"`
 	Error     string  `json:"error,omitempty"`
+	Title     *string `json:"title,omitempty"`
+	URL       *string `json:"url,omitempty"`
 }
 
 type ScriptRunner struct {
@@ -47,7 +49,7 @@ func NewScriptRunner(cfg Config) (*ScriptRunner, error) {
 	}
 
 	// Verify required scripts exist
-	requiredScripts := []string{"validate.py", "transcribe.py"}
+	requiredScripts := []string{"validate.py", "api.py"}
 	for _, script := range requiredScripts {
 		scriptPath := filepath.Join(cfg.ScriptsPath, script)
 		if _, err := os.Stat(scriptPath); os.IsNotExist(err) {
@@ -64,9 +66,13 @@ func NewScriptRunner(cfg Config) (*ScriptRunner, error) {
 func (r *ScriptRunner) Validate(ctx context.Context, url string) (VideoInfo, error) {
 	var result VideoInfo
 
-	output, err := r.runScript(ctx, "validate.py", map[string]string{
-		"url": url,
-	})
+	output, err := r.runScript(
+		ctx, "validate.py",
+		map[string]string{
+			"url": url,
+		},
+		[]string{},
+	)
 	if err != nil {
 		return result, fmt.Errorf("validation failed: %w", err)
 	}
@@ -78,7 +84,12 @@ func (r *ScriptRunner) Validate(ctx context.Context, url string) (VideoInfo, err
 	return result, nil
 }
 
-func (r *ScriptRunner) Transcribe(ctx context.Context, url string, opts map[string]string) (TranscriptionResult, error) {
+func (r *ScriptRunner) Transcribe(
+	ctx context.Context,
+	url string,
+	opts map[string]string,
+	enableConstraints bool,
+) (TranscriptionResult, error) {
 	var result TranscriptionResult
 
 	logger := r.logger.WithFields(logrus.Fields{
@@ -95,7 +106,12 @@ func (r *ScriptRunner) Transcribe(ctx context.Context, url string, opts map[stri
 		args[k] = v
 	}
 
-	output, err := r.runScript(ctx, "transcribe.py", args)
+	var flags []string
+	if enableConstraints {
+		flags = append(flags, "enable_constraints")
+	}
+
+	output, err := r.runScript(ctx, "api.py", args, flags)
 	if err != nil {
 		logger.WithError(err).Error("Transcription script execution failed")
 		return result, fmt.Errorf("transcription failed: %w", err)
@@ -109,11 +125,17 @@ func (r *ScriptRunner) Transcribe(ctx context.Context, url string, opts map[stri
 	return result, nil
 }
 
-func (r *ScriptRunner) runScript(ctx context.Context, scriptName string, args map[string]string) ([]byte, error) {
+func (r *ScriptRunner) runScript(
+	ctx context.Context,
+	scriptName string,
+	args map[string]string,
+	flags []string,
+) ([]byte, error) {
 	scriptPath := filepath.Join(r.config.ScriptsPath, scriptName)
 	logger := r.logger.WithFields(logrus.Fields{
 		"script": scriptName,
 		"args":   args,
+		"flags":  flags,
 	})
 
 	logger.Info("Executing script")
@@ -125,9 +147,11 @@ func (r *ScriptRunner) runScript(ctx context.Context, scriptName string, args ma
 			cmdArgs = append(cmdArgs, fmt.Sprintf("--%s", k), v)
 		}
 	}
-	cmdArgs = append(cmdArgs, "--json")
+	// Append flags without values
+	for _, flag := range flags {
+		cmdArgs = append(cmdArgs, fmt.Sprintf("--%s", flag))
+	}
 
-	// Correctly pass command and arguments
 	cmd := exec.CommandContext(ctx, "uv", cmdArgs...)
 	cmd.Dir = r.config.ScriptsPath
 	cmd.Env = append(os.Environ(),

@@ -123,7 +123,7 @@ func (s *service) processVideo(video *models.Video) {
 	}
 
 	// Perform transcription
-	result, err := s.scripts.Transcribe(ctx, video.URL, opts)
+	result, err := s.scripts.Transcribe(ctx, video.URL, opts, true)
 	if err != nil {
 		logger.WithError(err).Error("Transcription failed")
 		video.Status = models.StatusFailed
@@ -132,6 +132,7 @@ func (s *service) processVideo(video *models.Video) {
 		logger.Info("Transcription completed successfully")
 		video.Status = models.StatusCompleted
 		video.Transcription = result.Text
+		video.Title = *result.Title
 	}
 
 	video.UpdatedAt = time.Now()

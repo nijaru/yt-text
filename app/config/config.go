@@ -53,11 +53,11 @@ type DatabaseConfig struct {
 type VideoConfig struct {
 	ProcessTimeout time.Duration `json:"process_timeout"`
 	MaxDuration    time.Duration `json:"max_duration"`
-	MaxFileSize    int64         `json:"max_file_size"`
-	DefaultModel   string        `json:"default_model"`
-	PythonPath     string        `json:"python_path"`
-	ScriptsPath    string        `json:"scripts_path"`
-	Environment    []string      `json:"environment"`
+	// MaxFileSize    int64         `json:"max_file_size"`
+	DefaultModel string   `json:"default_model"`
+	PythonPath   string   `json:"python_path"`
+	ScriptsPath  string   `json:"scripts_path"`
+	Environment  []string `json:"environment"`
 }
 
 type CORSConfig struct {
@@ -99,9 +99,12 @@ func Load() (*Config, error) {
 
 		// CORS Configuration
 		CORS: CORSConfig{
-			Enabled:          getEnvAsBool("CORS_ENABLED", true),
-			AllowedOrigins:   getEnvAsStringSlice("CORS_ALLOWED_ORIGINS", []string{"*"}),
-			AllowedMethods:   getEnvAsStringSlice("CORS_ALLOWED_METHODS", []string{"GET", "POST", "OPTIONS"}),
+			Enabled:        getEnvAsBool("CORS_ENABLED", true),
+			AllowedOrigins: getEnvAsStringSlice("CORS_ALLOWED_ORIGINS", []string{"*"}),
+			AllowedMethods: getEnvAsStringSlice(
+				"CORS_ALLOWED_METHODS",
+				[]string{"GET", "POST", "OPTIONS"},
+			),
 			AllowedHeaders:   getEnvAsStringSlice("CORS_ALLOWED_HEADERS", []string{"Content-Type"}),
 			ExposedHeaders:   getEnvAsStringSlice("CORS_EXPOSED_HEADERS", []string{}),
 			AllowCredentials: getEnvAsBool("CORS_ALLOW_CREDENTIALS", false),
@@ -125,10 +128,10 @@ func Load() (*Config, error) {
 		Video: VideoConfig{
 			ProcessTimeout: getEnvAsDuration("VIDEO_PROCESS_TIMEOUT", 30*time.Minute),
 			MaxDuration:    getEnvAsDuration("VIDEO_MAX_DURATION", 4*time.Hour),
-			MaxFileSize:    getEnvAsInt64("VIDEO_MAX_FILE_SIZE", 100*1024*1024), // 100MB
-			DefaultModel:   getEnv("WHISPER_MODEL", "base.en"),
-			PythonPath:     getEnv("PYTHON_PATH", "python3"),
-			ScriptsPath:    getEnv("SCRIPTS_PATH", "./scripts"),
+			// MaxFileSize:    getEnvAsInt64("VIDEO_MAX_FILE_SIZE", 100*1024*1024), // 100MB
+			DefaultModel: getEnv("WHISPER_MODEL", "base.en"),
+			PythonPath:   getEnv("PYTHON_PATH", "python3"),
+			ScriptsPath:  getEnv("SCRIPTS_PATH", "./scripts"),
 		},
 	}
 
@@ -187,9 +190,9 @@ func validateServices(c *Config) error {
 	if c.Video.MaxDuration <= 0 {
 		return errors.New("max video duration must be positive")
 	}
-	if c.Video.MaxFileSize <= 0 {
-		return errors.New("max file size must be positive")
-	}
+	// if c.Video.MaxFileSize <= 0 {
+	// 	return errors.New("max file size must be positive")
+	// }
 	return nil
 }
 

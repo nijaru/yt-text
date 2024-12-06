@@ -85,8 +85,8 @@ func setupApplication(cfg *config.Config) error {
 		video.Config{
 			ProcessTimeout: cfg.Video.ProcessTimeout,
 			MaxDuration:    cfg.Video.MaxDuration,
-			MaxFileSize:    cfg.Video.MaxFileSize,
-			DefaultModel:   cfg.Video.DefaultModel,
+			// MaxFileSize:    cfg.Video.MaxFileSize,
+			DefaultModel: cfg.Video.DefaultModel,
 		},
 	)
 

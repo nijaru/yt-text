@@ -15,8 +15,9 @@ const (
 type Video struct {
 	ID            string    `json:"id"`
 	URL           string    `json:"url"`
+	Title         string    `json:"title"`
+	Transcription string    `json:"transcription"`
 	Status        Status    `json:"status"`
-	Transcription string    `json:"transcription,omitempty"`
 	Error         string    `json:"error,omitempty"`
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`

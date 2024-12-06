@@ -2,7 +2,7 @@
 
 A tool that combines [yt-dlp](https://github.com/yt-dlp/yt-dlp) and [Faster Whisper](https://github.com/guillaumekln/faster-whisper) to convert videos to text. It operates as a web server that accepts URLs from YouTube or any other platform supported by yt-dlp (such as Vimeo, Twitter, TikTok, etc.) and returns the video's transcript.
 
-The current `transcribe.py` script is designed to work with the web server. A standalone version for direct command-line usage will be added in a future update.
+A standalone version for direct command-line usage is available at `yt-text/python/scripts/yt-text.py`.
 
 ## Features
 
@@ -22,41 +22,27 @@ The current `transcribe.py` script is designed to work with the web server. A st
    cd yt-text
    ```
 
-2. (Optional) Create a virtual environment and activate it:
+## Usage
 
-   ```sh
-   python -m venv venv
-   source venv/bin/activate  # On Windows use `venv\Scripts\activate`
-   ```
+### Command Line
 
-3. Install Python dependencies:
+The script `yt-text.py` provides a simple interface for downloading audio and transcribing it to text. You can provide any number of urls as separate arguments or as comma-separated values. They can either be passed in directly or by using `--url`.
 
-   ```sh
-   pip install torch yt-dlp faster-whisper pydub
-   ```
-
-4. Run the web server:
-   ```sh
-   go run main.go
-   ```
-
-## Current Usage
-
-The `transcribe.py` script is currently integrated with the web server and expects specific arguments:
+The script should support any URLs supported by yt-dlp, including YouTube, Vimeo, Twitter, and TikTok. The script will download the audio from the video and transcribe it to text using the specified Whisper model. The default model is `base.en` for English with a good balance of speed and accuracy.
 
 ```sh
-python transcribe.py --url <youtube-url> [--model <model_name>] [--json]
+python3 transcribe.py <youtube-url>
 ```
 
-Options:
+```sh
+python3 transcribe.py --url <youtube-url>
+```
 
-- `--url`: Video URL to transcribe (required) - supports YouTube and other platforms compatible with yt-dlp
-- `--model`: Whisper model to use (default: "base.en")
-- `--json`: Output in JSON format
+### Options
 
-Note: A standalone version of the script for direct command-line usage will be provided in a future update.
+- `--model`: Specify the Whisper model to use. (Default is `base.en`)
 
-## Available Models
+### Available Models
 
 The script supports various Whisper models:
 
@@ -68,10 +54,52 @@ The script supports various Whisper models:
 
 Language-specific models are also available (e.g., `base.en` for English-optimized model).
 
+### Web Server
+
+#### Docker (Recommended)
+
+In order to run the web server using Docker, you need to have Docker installed on your system. There is a Dockerfile and docker-compose.yml file included in the repository.
+
+1. Build and run the Docker container:
+
+   ```sh
+   docker-compose up --build
+   ```
+
+#### Manual Installation
+
+The project uses [uv](https://github.com/astral-sh/uv) to run the python code from the web server and that is the recommend way of running the code. The following instructions are for manual installation of the python environment and starting the web server, but this is not actively tested.
+
+1. Using uv:
+
+```sh
+cd python
+uv sync
+source venv/bin/activate  # On Windows use `venv\Scripts\activate`
+```
+
+2. (Optional) Manually create a virtual environment, activate it, and install dependencies:
+
+```sh
+cd python
+python -m venv venv
+source venv/bin/activate  # On Windows use `venv\Scripts\activate`
+pip install -r requirements.txt
+```
+
+3. Run the web server:
+
+```sh
+cd ../app
+go run ./...
+```
+
+## Notes
+
+The python code was recently refactored to add a standalone script with the same functionality as the web server. The refactor is not yet complete and needs to be tested. The manual server instructions have not yet been retested and may not work. The Makefile has not been updated to reflect the changes in the project structure. Docker is the recommend way of running the web server. The script should work standalone as long as the dependencies are installed.
+
 ## Limitations
 
-- Maximum video duration: 4 hours
-  - Can be changed in transcribe.py
 - GPU acceleration requires CUDA-compatible hardware
   - Can use CPU if not available
 

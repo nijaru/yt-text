@@ -21,7 +21,7 @@ type Config struct {
 
 	// Max file size and duration limits
 	MaxDuration time.Duration `json:"max_duration"`
-	MaxFileSize int64         `json:"max_file_size"`
+	// MaxFileSize int64         `json:"max_file_size"`
 
 	// Model configuration
 	DefaultModel string `json:"default_model"`
