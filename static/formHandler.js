@@ -20,10 +20,10 @@ document
 		// Basic validation
 		if (!validateURL(url)) {
 			responseDiv.innerHTML = `
-                <div class="bg-red-500 text-white p-4 rounded-md">
-                    <p>Please enter a valid YouTube URL</p>
-                </div>
-            `;
+            <div class="bg-red-500 text-white p-4 rounded-md">
+                <p>Please enter a valid YouTube URL</p>
+            </div>
+        `;
 			return;
 		}
 
@@ -31,11 +31,11 @@ document
 		submitButton.disabled = true;
 		statusDiv.classList.remove("hidden");
 		statusDiv.innerHTML = `
-            <div class="flex items-center">
-                <div class="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500 mr-2"></div>
-                <span>Processing video...</span>
-            </div>
-        `;
+        <div class="flex items-center">
+            <div class="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500 mr-2"></div>
+            <span>Processing video...</span>
+        </div>
+    `;
 
 		try {
 			const formData = new URLSearchParams();
@@ -55,24 +55,44 @@ document
 				throw new Error(responseData.error || "Failed to process video");
 			}
 
-			const videoId = responseData.data.id;
-			if (!videoId) {
-				throw new Error("No video ID received from server");
-			}
+			const videoData = responseData.data;
+			console.log("Initial response:", videoData); // Debug log
 
-			// Poll for status
-			await pollTranscriptionStatus(videoId, statusDiv, responseDiv);
+			// If the video is already completed, show it immediately
+			if (videoData.status === "completed") {
+				showTranscription(videoData, statusDiv, responseDiv);
+			} else {
+				// Otherwise, poll for status
+				await pollTranscriptionStatus(videoData.id, statusDiv, responseDiv);
+			}
 		} catch (error) {
 			statusDiv.classList.add("hidden");
 			responseDiv.innerHTML = `
-                <div class="bg-red-500 text-white p-4 rounded-md">
-                    <p>${error.message}</p>
-                </div>
-            `;
+            <div class="bg-red-500 text-white p-4 rounded-md">
+                <p>${error.message}</p>
+            </div>
+        `;
 		} finally {
 			submitButton.disabled = false;
 		}
 	});
+
+// Extract showing transcription to a separate function
+function showTranscription(data, statusDiv, responseDiv) {
+	console.log("Showing transcription:", data); // Debug log
+
+	statusDiv.classList.add("hidden");
+	document.getElementById("transcriptionHeader").classList.remove("hidden");
+
+	responseDiv.innerHTML = `
+        <div class="bg-gray-700 p-4 rounded-md">
+            <pre class="whitespace-pre-wrap">${data.transcription || ""}</pre>
+        </div>
+    `;
+
+	// Enable action buttons
+	setupActionButtons(data.transcription || "");
+}
 
 async function pollTranscriptionStatus(id, statusDiv, responseDiv) {
 	const maxAttempts = 30 * 60; // 30 minutes at 1-second intervals
@@ -88,22 +108,10 @@ async function pollTranscriptionStatus(id, statusDiv, responseDiv) {
 			}
 
 			const data = responseData.data;
+			console.log("Poll response:", data); // Debug log
 
 			if (data.status === "completed") {
-				// Hide status and show result
-				statusDiv.classList.add("hidden");
-				document
-					.getElementById("transcriptionHeader")
-					.classList.remove("hidden");
-
-				responseDiv.innerHTML = `
-                    <div class="bg-gray-700 p-4 rounded-md">
-                        <pre class="whitespace-pre-wrap">${data.transcription}</pre>
-                    </div>
-                `;
-
-				// Enable action buttons
-				setupActionButtons(data.transcription);
+				showTranscription(data, statusDiv, responseDiv);
 				break;
 			}
 

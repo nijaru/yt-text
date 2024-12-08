@@ -6,13 +6,25 @@ from typing import Dict, Optional
 import torch
 import yt_dlp
 from faster_whisper import WhisperModel
-from pydub import AudioSegment
 
 
 class TranscriptionError(Exception):
     """Base exception for transcription errors"""
 
     pass
+
+
+class NullLogger:
+    """A logger class that does nothing. Used to suppress yt_dlp output."""
+
+    def debug(self, msg):
+        pass
+
+    def warning(self, msg):
+        pass
+
+    def error(self, msg):
+        pass
 
 
 class Transcriber:
@@ -46,11 +58,8 @@ class Transcriber:
                 # Download audio and retrieve media title
                 audio_path, media_title = self._download_audio(url, temp_dir)
 
-                # Process audio
-                processed_audio_path = self._process_audio(audio_path)
-
                 # Transcribe
-                transcription = self._transcribe(processed_audio_path)
+                transcription = self._transcribe(audio_path)
 
                 # Include title and URL in the result
                 transcription["title"] = media_title
@@ -77,26 +86,26 @@ class Transcriber:
                 "url": url,
             }
 
-    def _download_audio(self, url: str, temp_dir: str) -> (str, str):
+    def _download_audio(self, url: str, temp_dir: str) -> tuple[str, str]:
         """Download audio from URL and retrieve media title."""
         ydl_opts = {
             "format": "bestaudio/best",
             "outtmpl": os.path.join(temp_dir, "%(id)s.%(ext)s"),
             "quiet": True,
             "no_warnings": True,
-            "extract_audio": True,
+            "extractaudio": True,
+            "logger": NullLogger(),  # Suppress yt_dlp logs
         }
 
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 # Extract info without downloading
                 info = ydl.extract_info(url, download=False)
+                if not isinstance(info, dict):
+                    raise TranscriptionError("Failed to extract video information.")
 
                 # Retrieve media title
-                media_title = info.get("title")
-                if not media_title:
-                    # Use URL as title if no title is provided
-                    media_title = url
+                media_title = info.get("title") or url
 
                 # Validate duration if constraint is set
                 duration = info.get("duration", 0)
@@ -105,8 +114,11 @@ class Transcriber:
                         f"Media duration ({duration}s) exceeds maximum allowed ({self.max_video_duration}s)"
                     )
 
-                # Download audio
+                # Download and process audio
                 info = ydl.extract_info(url, download=True)
+                if not isinstance(info, dict):
+                    raise TranscriptionError("Failed to download audio.")
+
                 downloaded_file = ydl.prepare_filename(info)
 
                 # Handle file size constraints
@@ -122,26 +134,6 @@ class Transcriber:
             raise
         except Exception as e:
             raise TranscriptionError(f"Failed to download audio: {e}")
-
-    def _process_audio(self, file_path: str) -> str:
-        """Convert audio to required format."""
-        try:
-            audio = AudioSegment.from_file(file_path)
-
-            # Convert to mono and set sample rate
-            audio = audio.set_frame_rate(16000).set_channels(1)
-
-            # Define processed file path
-            processed_path = f"{file_path}_processed.wav"
-
-            # Export processed audio
-            audio.export(
-                processed_path, format="wav", parameters=["-ac", "1", "-ar", "16000"]
-            )
-
-            return processed_path
-        except Exception as e:
-            raise TranscriptionError(f"Failed to process audio: {e}")
 
     def _transcribe(self, audio_path: str) -> Dict:
         """Transcribe audio file."""

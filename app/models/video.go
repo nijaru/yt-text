@@ -42,7 +42,10 @@ type VideoResponse struct {
 	URL           string `json:"url"`
 	Status        Status `json:"status"`
 	Transcription string `json:"transcription,omitempty"`
+	Title         string `json:"title,omitempty"`
 	Error         string `json:"error,omitempty"`
+	CreatedAt     string `json:"created_at"`
+	UpdatedAt     string `json:"updated_at"`
 }
 
 // NewVideoResponse creates a response from a video model
@@ -52,6 +55,9 @@ func NewVideoResponse(v *Video) *VideoResponse {
 		URL:           v.URL,
 		Status:        v.Status,
 		Transcription: v.Transcription,
+		Title:         v.Title,
 		Error:         v.Error,
+		CreatedAt:     v.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:     v.UpdatedAt.Format(time.RFC3339),
 	}
 }

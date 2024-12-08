@@ -203,6 +203,11 @@ func (c *Config) Validate() error {
 		return err
 	}
 
+	// Validate services
+	if err := validateServices(c); err != nil {
+		return err
+	}
+
 	return nil
 }
 

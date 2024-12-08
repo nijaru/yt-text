@@ -47,43 +47,74 @@ func (s *service) Transcribe(ctx context.Context, url string) (*models.Video, er
 	logger.Info("Starting transcription request")
 
 	// Check for existing transcription first
-	existing, err := s.repo.FindByURL(ctx, url)
+	video, err := s.repo.FindByURL(ctx, url)
 	if err == nil {
-		if existing.IsCompleted() {
-			return existing, nil
+		// Handle existing video
+		if shouldProcessExisting(video, s.config.ProcessTimeout) {
+			return s.startProcessing(ctx, video)
 		}
-		if existing.IsProcessing() && !existing.IsStale(s.config.ProcessTimeout) {
-			return existing, nil
-		}
-		// If it's stale or failed, we'll continue with reprocessing
+		return video, nil
 	}
 
-	// Basic URL validation
-	if err := s.validator.ValidateURL(url); err != nil {
-		logger.WithError(err).Info("URL validation failed")
+	// For new videos, validate and create
+	if err := s.validateNewVideo(ctx, url); err != nil {
 		return nil, err
 	}
 
-	// Validate video metadata using yt-dlp
+	// Create new video record
+	video = &models.Video{
+		ID:        uuid.New().String(),
+		URL:       url,
+		CreatedAt: time.Now(),
+	}
+
+	return s.startProcessing(ctx, video)
+}
+
+func shouldProcessExisting(video *models.Video, timeout time.Duration) bool {
+	switch video.Status {
+	case models.StatusCompleted:
+		return false
+	case models.StatusProcessing:
+		return video.IsStale(timeout)
+	case models.StatusFailed:
+		return true
+	default:
+		return true
+	}
+}
+
+func (s *service) validateNewVideo(ctx context.Context, url string) error {
+	const op = "VideoService.validateNewVideo"
+
+	// Basic URL validation
+	if err := s.validator.ValidateURL(url); err != nil {
+		s.logger.WithError(err).Info("URL validation failed")
+		return err
+	}
+
+	// Validate video metadata
 	info, err := s.scripts.Validate(ctx, url)
 	if err != nil {
-		logger.WithError(err).Error("Video validation script failed")
-		return nil, errors.InvalidInput(op, err, "Failed to validate video")
+		s.logger.WithError(err).Error("Video validation script failed")
+		return errors.InvalidInput(op, err, "Failed to validate video")
 	}
 
 	if !info.Valid {
-		logger.WithField("error", info.Error).Info("Video validation failed")
-		return nil, errors.InvalidInput(op, nil, info.Error)
+		s.logger.WithField("error", info.Error).Info("Video validation failed")
+		return errors.InvalidInput(op, nil, info.Error)
 	}
 
-	// Create or update video record
-	video := &models.Video{
-		ID:        uuid.New().String(),
-		URL:       url,
-		Status:    models.StatusProcessing,
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
-	}
+	return nil
+}
+
+func (s *service) startProcessing(ctx context.Context, video *models.Video) (*models.Video, error) {
+	const op = "VideoService.startProcessing"
+
+	// Update status and timestamp
+	video.Status = models.StatusProcessing
+	video.UpdatedAt = time.Now()
+	video.Error = "" // Clear any previous error
 
 	if err := s.repo.Save(ctx, video); err != nil {
 		return nil, errors.Internal(op, err, "Failed to save video")
@@ -132,7 +163,18 @@ func (s *service) processVideo(video *models.Video) {
 		logger.Info("Transcription completed successfully")
 		video.Status = models.StatusCompleted
 		video.Transcription = result.Text
-		video.Title = *result.Title
+		if result.Title != nil {
+			video.Title = *result.Title
+		} else {
+			video.Title = video.URL
+		}
+
+		// Add debug logging
+		logger.WithFields(logrus.Fields{
+			"transcription_length": len(video.Transcription),
+			"title":                video.Title,
+			"status":               video.Status,
+		}).Info("Updated video with transcription")
 	}
 
 	video.UpdatedAt = time.Now()
@@ -140,5 +182,13 @@ func (s *service) processVideo(video *models.Video) {
 	// Update video record
 	if err := s.repo.Save(ctx, video); err != nil {
 		logger.WithError(err).Error("Failed to save transcription result")
+	} else {
+		// Add debug logging after save
+		logger.WithFields(logrus.Fields{
+			"transcription_length": len(video.Transcription),
+			"title":                video.Title,
+			"status":               video.Status,
+			"updated_at":           video.UpdatedAt,
+		}).Info("Saved video with transcription")
 	}
 }

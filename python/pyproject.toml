@@ -5,8 +5,7 @@ description = "Download YouTube audio and convert it to text using yt-dlp and Op
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "faster-whisper>=1.0.3",
-    "pydub>=0.25.1",
-    "torch>=2.5.1",
-    "yt-dlp>=2024.11.18",
+	"faster-whisper>=1.0.3",
+	"torch>=2.5.1",
+	"yt-dlp>=2024.11.18",
 ]

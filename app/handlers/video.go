@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"yt-text/errors"
+	"yt-text/models"
 	"yt-text/services/video"
 
 	"github.com/gofiber/fiber/v2"
@@ -29,9 +30,10 @@ func (h *VideoHandler) Transcribe(c *fiber.Ctx) error {
 		return err
 	}
 
+	// Use NewVideoResponse for consistency
 	return c.JSON(fiber.Map{
 		"success": true,
-		"data":    video,
+		"data":    models.NewVideoResponse(video),
 	})
 }
 
@@ -51,6 +53,6 @@ func (h *VideoHandler) GetTranscription(c *fiber.Ctx) error {
 
 	return c.JSON(fiber.Map{
 		"success": true,
-		"data":    video,
+		"data":    models.NewVideoResponse(video),
 	})
 }

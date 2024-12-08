@@ -147,7 +147,6 @@ func (r *ScriptRunner) runScript(
 			cmdArgs = append(cmdArgs, fmt.Sprintf("--%s", k), v)
 		}
 	}
-	// Append flags without values
 	for _, flag := range flags {
 		cmdArgs = append(cmdArgs, fmt.Sprintf("--%s", flag))
 	}
@@ -166,9 +165,17 @@ func (r *ScriptRunner) runScript(
 	err := cmd.Run()
 	if err != nil {
 		stderrOutput := stderr.String()
-		logger.WithError(err).Error("Script execution failed")
+		logger.WithError(err).WithField("stderr", stderrOutput).Error("Script execution failed")
 		return nil, fmt.Errorf("script execution failed: %v (stderr: %s)", err, stderrOutput)
 	}
 
-	return stdout.Bytes(), nil
+	// Try to parse output as JSON to ensure it's valid
+	output := stdout.Bytes()
+	var jsonTest interface{}
+	if err := json.Unmarshal(output, &jsonTest); err != nil {
+		logger.WithError(err).WithField("output", string(output)).Error("Invalid JSON output")
+		return nil, fmt.Errorf("invalid JSON output: %v", err)
+	}
+
+	return output, nil
 }

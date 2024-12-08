@@ -2,7 +2,7 @@
 
 A tool that combines [yt-dlp](https://github.com/yt-dlp/yt-dlp) and [Faster Whisper](https://github.com/guillaumekln/faster-whisper) to convert videos to text. It operates as a web server that accepts URLs from YouTube or any other platform supported by yt-dlp (such as Vimeo, Twitter, TikTok, etc.) and returns the video's transcript.
 
-A standalone version for direct command-line usage is available at `yt-text/python/scripts/yt-text.py`.
+A standalone version for direct command-line usage is available at `yt-text/python/scripts/ytext.py`.
 
 ## Features
 
@@ -26,16 +26,18 @@ A standalone version for direct command-line usage is available at `yt-text/pyth
 
 ### Command Line
 
-The script `yt-text.py` provides a simple interface for downloading audio and transcribing it to text. You can provide any number of urls as separate arguments or as comma-separated values. They can either be passed in directly or by using `--url`.
+The script `ytext.py` provides a simple interface for downloading audio and transcribing it to text. You can provide any number of urls as separate arguments or as comma-separated values. They can either be passed in directly or by using `--url`.
 
 The script should support any URLs supported by yt-dlp, including YouTube, Vimeo, Twitter, and TikTok. The script will download the audio from the video and transcribe it to text using the specified Whisper model. The default model is `base.en` for English with a good balance of speed and accuracy.
 
+Dependencies are listed in the `requirements.txt` file. You can install them using pip or simply run the script with [uv](https://github.com/astral-sh/uv).
+
 ```sh
-python3 transcribe.py <youtube-url>
+python3 ytext.py <youtube-url>
 ```
 
 ```sh
-python3 transcribe.py --url <youtube-url>
+python3 ytext.py --url <youtube-url>
 ```
 
 ### Options
@@ -58,41 +60,13 @@ Language-specific models are also available (e.g., `base.en` for English-optimiz
 
 #### Docker (Recommended)
 
-In order to run the web server using Docker, you need to have Docker installed on your system. There is a Dockerfile and docker-compose.yml file included in the repository.
+In order to run the web server using Docker, you need to have Docker installed on your system. There is a Dockerfile and docker-compose.yml file included in the repository. The server can be run manually, but this is not actively tested.
 
 1. Build and run the Docker container:
 
    ```sh
    docker-compose up --build
    ```
-
-#### Manual Installation
-
-The project uses [uv](https://github.com/astral-sh/uv) to run the python code from the web server and that is the recommend way of running the code. The following instructions are for manual installation of the python environment and starting the web server, but this is not actively tested.
-
-1. Using uv:
-
-```sh
-cd python
-uv sync
-source venv/bin/activate  # On Windows use `venv\Scripts\activate`
-```
-
-2. (Optional) Manually create a virtual environment, activate it, and install dependencies:
-
-```sh
-cd python
-python -m venv venv
-source venv/bin/activate  # On Windows use `venv\Scripts\activate`
-pip install -r requirements.txt
-```
-
-3. Run the web server:
-
-```sh
-cd ../app
-go run ./...
-```
 
 ## Notes
 

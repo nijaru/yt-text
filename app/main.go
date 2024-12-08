@@ -108,6 +108,7 @@ func main() {
 	app.Get("/health", handlers.HealthCheck)
 
 	// Static files
+	app.Static("/static", "/app/static")
 	app.Static("/", "/app/static")
 
 	// Graceful shutdown setup

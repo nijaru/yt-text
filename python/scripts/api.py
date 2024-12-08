@@ -1,19 +1,11 @@
 import argparse
 import json
-import logging
 import sys
 
 from transcription import Transcriber
 
 
 def main():
-    # Configure logging
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(message)s",
-        handlers=[logging.StreamHandler(sys.stdout)],
-    )
-
     parser = argparse.ArgumentParser(description="Transcribe media")
     parser.add_argument(
         "--url", type=str, required=True, help="Media URL(s), comma-separated"
@@ -30,37 +22,82 @@ def main():
     urls = [url.strip() for url in args.url.split(",") if url.strip()]
 
     if not urls:
-        logging.warning("No valid URLs provided.")
-        return
+        error_response = {
+            "text": None,
+            "model_name": args.model,
+            "duration": 0,
+            "error": "No valid URLs provided.",
+            "title": None,
+            "url": None,
+        }
+        print(json.dumps(error_response))
+        sys.exit(1)
 
     # If constraints are enabled, limit to one URL
     if args.enable_constraints:
         urls = urls[:1]
 
-    # Configuration for constraints
-    max_video_duration = 4 * 3600 if args.enable_constraints else None
-    max_file_size = 100 * 1024 * 1024 if args.enable_constraints else None
+    formatted_result = None
 
-    # Initialize Transcriber
-    transcriber = Transcriber(
-        model_name=args.model,
-        max_video_duration=max_video_duration,
-        max_file_size=max_file_size,
-    )
+    try:
+        transcriber = Transcriber(
+            model_name=args.model,
+            max_video_duration=4 * 3600 if args.enable_constraints else None,
+            max_file_size=100 * 1024 * 1024 if args.enable_constraints else None,
+        )
 
-    results = []
-    for url in urls:
-        logging.info(f"Processing URL: {url}")
-        result = transcriber.process_url(url)
-        results.append(result)
+        results = []
+        for url in urls:
+            result = transcriber.process_url(url)
+            results.append(result)
 
-    transcriber.close()
+        transcriber.close()
 
-    # If only one URL was processed, return a single object instead of a list
-    output = results[0] if len(results) == 1 else results
+        # Prepare the final result
+        if len(results) == 1:
+            output = results[0]
+        else:
+            output = results
 
-    # Output results as JSON
-    print(json.dumps(output))
+        # Format the output to include only necessary fields
+        if isinstance(output, dict):
+            formatted_result = {
+                "text": output.get("text"),
+                "model_name": output.get("model_name"),
+                "duration": output.get("duration", 0),
+                "error": output.get("error"),
+                "title": output.get("title"),
+                "url": output.get("url"),
+            }
+        else:
+            # Handle list of results
+            formatted_result = []
+            for item in output:
+                formatted_item = {
+                    "text": item.get("text"),
+                    "model_name": item.get("model_name"),
+                    "duration": item.get("duration", 0),
+                    "error": item.get("error"),
+                    "title": item.get("title"),
+                    "url": item.get("url"),
+                }
+                formatted_result.append(formatted_item)
+
+    except Exception as e:
+        # Standardize error output format
+        formatted_result = {
+            "text": None,
+            "model_name": args.model,
+            "duration": 0,
+            "error": f"Unexpected error: {e}",
+            "title": None,
+            "url": urls[0] if urls else None,
+        }
+
+    finally:
+        # Output JSON response without any logging
+        sys.stdout.write(json.dumps(formatted_result))
+        sys.stdout.flush()
 
 
 if __name__ == "__main__":
