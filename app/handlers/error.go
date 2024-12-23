@@ -1,10 +1,10 @@
 package handlers
 
 import (
-	"log"
 	"yt-text/errors"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/rs/zerolog/log"
 )
 
 func ErrorHandler(c *fiber.Ctx, err error) error {
@@ -16,12 +16,13 @@ func ErrorHandler(c *fiber.Ctx, err error) error {
 		message = e.Message
 	}
 
-	log.Printf("Error: %v, RequestID: %s, Path: %s, Method: %s",
-		err,
-		c.Get("X-Request-ID"),
-		c.Path(),
-		c.Method(),
-	)
+	log.Error().
+		Str("request_id", c.Get("X-Request-ID")).
+		Str("path", c.Path()).
+		Str("method", c.Method()).
+		Int("status", code).
+		Err(err).
+		Msg("Request error")
 
 	return c.Status(code).JSON(fiber.Map{
 		"success":    false,

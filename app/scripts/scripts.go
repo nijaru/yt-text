@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/sirupsen/logrus"
+	"github.com/rs/zerolog"
 )
 
 type Config struct {
@@ -39,9 +39,7 @@ type TranscriptionResult struct {
 
 type ScriptRunner struct {
 	config Config
-	logger *logrus.Logger
 }
-
 func NewScriptRunner(cfg Config) (*ScriptRunner, error) {
 	// Verify scripts directory exists
 	if _, err := os.Stat(cfg.ScriptsPath); os.IsNotExist(err) {
@@ -59,7 +57,6 @@ func NewScriptRunner(cfg Config) (*ScriptRunner, error) {
 
 	return &ScriptRunner{
 		config: cfg,
-		logger: logrus.StandardLogger(),
 	}, nil
 }
 
@@ -92,11 +89,12 @@ func (r *ScriptRunner) Transcribe(
 ) (TranscriptionResult, error) {
 	var result TranscriptionResult
 
-	logger := r.logger.WithFields(logrus.Fields{
-		"url":  url,
-		"opts": opts,
-	})
-	logger.Debug("Starting transcription")
+	logger := zerolog.Ctx(ctx).With().
+		Str("url", url).
+		Interface("opts", opts).
+		Logger()
+
+	logger.Debug().Msg("Starting transcription")
 
 	args := map[string]string{
 		"url": url,
@@ -113,12 +111,12 @@ func (r *ScriptRunner) Transcribe(
 
 	output, err := r.runScript(ctx, "api.py", args, flags)
 	if err != nil {
-		logger.WithError(err).Error("Transcription script execution failed")
+		logger.Error().Err(err).Msg("Transcription script execution failed")
 		return result, fmt.Errorf("transcription failed: %w", err)
 	}
 
 	if err := json.Unmarshal(output, &result); err != nil {
-		logger.WithError(err).Error("Failed to parse transcription result")
+		logger.Error().Err(err).Msg("Failed to parse transcription result")
 		return result, fmt.Errorf("failed to parse transcription result: %w", err)
 	}
 
@@ -132,13 +130,13 @@ func (r *ScriptRunner) runScript(
 	flags []string,
 ) ([]byte, error) {
 	scriptPath := filepath.Join(r.config.ScriptsPath, scriptName)
-	logger := r.logger.WithFields(logrus.Fields{
-		"script": scriptName,
-		"args":   args,
-		"flags":  flags,
-	})
+	logger := zerolog.Ctx(ctx).With().
+		Str("script", scriptName).
+		Interface("args", args).
+		Interface("flags", flags).
+		Logger()
 
-	logger.Info("Executing script")
+	logger.Info().Msg("Executing script")
 
 	// Build command with args
 	cmdArgs := []string{"run", scriptPath}
@@ -165,7 +163,10 @@ func (r *ScriptRunner) runScript(
 	err := cmd.Run()
 	if err != nil {
 		stderrOutput := stderr.String()
-		logger.WithError(err).WithField("stderr", stderrOutput).Error("Script execution failed")
+		logger.Error().
+			Err(err).
+			Str("stderr", stderrOutput).
+			Msg("Script execution failed")
 		return nil, fmt.Errorf("script execution failed: %v (stderr: %s)", err, stderrOutput)
 	}
 
@@ -173,7 +174,10 @@ func (r *ScriptRunner) runScript(
 	output := stdout.Bytes()
 	var jsonTest interface{}
 	if err := json.Unmarshal(output, &jsonTest); err != nil {
-		logger.WithError(err).WithField("output", string(output)).Error("Invalid JSON output")
+		logger.Error().
+			Err(err).
+			Str("output", string(output)).
+			Msg("Invalid JSON output")
 		return nil, fmt.Errorf("invalid JSON output: %v", err)
 	}
 

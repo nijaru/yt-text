@@ -10,7 +10,7 @@ import (
 	"yt-text/validation"
 
 	"github.com/google/uuid"
-	"github.com/sirupsen/logrus"
+	"github.com/rs/zerolog"
 )
 
 type Repository = repository.VideoRepository
@@ -20,7 +20,7 @@ type service struct {
 	scripts   *scripts.ScriptRunner
 	validator *validation.Validator
 	config    Config
-	logger    *logrus.Logger
+	logger    zerolog.Logger
 }
 
 func NewService(
@@ -34,17 +34,17 @@ func NewService(
 		scripts:   scriptRunner,
 		validator: validator,
 		config:    config,
-		logger:    logrus.StandardLogger(),
+		logger:    zerolog.New(zerolog.NewConsoleWriter()),
 	}
 }
 
 func (s *service) Transcribe(ctx context.Context, url string) (*models.Video, error) {
 	const op = "VideoService.Transcribe"
-	logger := s.logger.WithFields(logrus.Fields{
-		"operation": op,
-		"url":       url,
-	})
-	logger.Info("Starting transcription request")
+	logger := s.logger.With().
+		Str("operation", op).
+		Str("url", url).
+		Logger()
+	logger.Info().Msg("Starting transcription request")
 
 	// Check for existing transcription first
 	video, err := s.repo.FindByURL(ctx, url)
@@ -89,19 +89,19 @@ func (s *service) validateNewVideo(ctx context.Context, url string) error {
 
 	// Basic URL validation
 	if err := s.validator.ValidateURL(url); err != nil {
-		s.logger.WithError(err).Info("URL validation failed")
+		s.logger.Info().Err(err).Msg("URL validation failed")
 		return err
 	}
 
 	// Validate video metadata
 	info, err := s.scripts.Validate(ctx, url)
 	if err != nil {
-		s.logger.WithError(err).Error("Video validation script failed")
+		s.logger.Error().Err(err).Msg("Video validation script failed")
 		return errors.InvalidInput(op, err, "Failed to validate video")
 	}
 
 	if !info.Valid {
-		s.logger.WithField("error", info.Error).Info("Video validation failed")
+		s.logger.Info().Str("error", info.Error).Msg("Video validation failed")
 		return errors.InvalidInput(op, nil, info.Error)
 	}
 
@@ -142,11 +142,11 @@ func (s *service) GetTranscription(ctx context.Context, id string) (*models.Vide
 }
 
 func (s *service) processVideo(video *models.Video) {
-	logger := s.logger.WithField("video_id", video.ID)
+	logger := s.logger.With().Str("video_id", video.ID).Logger()
 	ctx, cancel := context.WithTimeout(context.Background(), s.config.ProcessTimeout)
 	defer cancel()
 
-	logger.Info("Starting transcription process")
+	logger.Info().Msg("Starting transcription process")
 
 	// Set up transcription options
 	opts := map[string]string{
@@ -156,11 +156,11 @@ func (s *service) processVideo(video *models.Video) {
 	// Perform transcription
 	result, err := s.scripts.Transcribe(ctx, video.URL, opts, true)
 	if err != nil {
-		logger.WithError(err).Error("Transcription failed")
+		logger.Error().Err(err).Msg("Transcription failed")
 		video.Status = models.StatusFailed
 		video.Error = err.Error()
 	} else {
-		logger.Info("Transcription completed successfully")
+		logger.Info().Msg("Transcription completed successfully")
 		video.Status = models.StatusCompleted
 		video.Transcription = result.Text
 		if result.Title != nil {
@@ -170,25 +170,25 @@ func (s *service) processVideo(video *models.Video) {
 		}
 
 		// Add debug logging
-		logger.WithFields(logrus.Fields{
-			"transcription_length": len(video.Transcription),
-			"title":                video.Title,
-			"status":               video.Status,
-		}).Info("Updated video with transcription")
+		logger.Info().
+			Int("transcription_length", len(video.Transcription)).
+			Str("title", video.Title).
+			Str("status", string(video.Status)).
+			Msg("Updated video with transcription")
 	}
 
 	video.UpdatedAt = time.Now()
 
 	// Update video record
 	if err := s.repo.Save(ctx, video); err != nil {
-		logger.WithError(err).Error("Failed to save transcription result")
+		logger.Error().Err(err).Msg("Failed to save transcription result")
 	} else {
 		// Add debug logging after save
-		logger.WithFields(logrus.Fields{
-			"transcription_length": len(video.Transcription),
-			"title":                video.Title,
-			"status":               video.Status,
-			"updated_at":           video.UpdatedAt,
-		}).Info("Saved video with transcription")
+		logger.Info().
+			Int("transcription_length", len(video.Transcription)).
+			Str("title", video.Title).
+			Str("status", string(video.Status)).
+			Time("updated_at", video.UpdatedAt).
+			Msg("Saved video with transcription")
 	}
 }

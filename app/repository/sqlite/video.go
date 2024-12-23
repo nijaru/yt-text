@@ -3,61 +3,60 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"strings"
+	"time"
 	"yt-text/errors"
 	"yt-text/models"
 )
 
-type SQLiteRepository struct {
-	db *sql.DB
+type Repository struct {
+	db *DB
 }
 
-func NewRepository(db *sql.DB) (*SQLiteRepository, error) {
-	return &SQLiteRepository{db: db}, nil
+func NewRepository(db *DB) (*Repository, error) {
+	return &Repository{db: db}, nil
 }
 
-func (r *SQLiteRepository) Save(ctx context.Context, video *models.Video) error {
+func (r *Repository) Save(ctx context.Context, video *models.Video) error {
 	const op = "SQLiteRepository.Save"
 
-	query := `
-        INSERT INTO videos (id, url, status, transcription, error, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(id) DO UPDATE SET
-            status = excluded.status,
-            transcription = excluded.transcription,
-            error = excluded.error,
-            updated_at = excluded.updated_at
-    `
+	for i := 0; i < 3; i++ { // Simple retry logic
+		err := r.save(ctx, video)
+		if err == nil {
+			return nil
+		}
+		if !isLockError(err) {
+			return errors.Internal(op, err, "Failed to save video")
+		}
+		time.Sleep(time.Second * time.Duration(i+1))
+	}
+	return errors.Internal(op, nil, "Failed after retries")
+}
 
-	_, err := r.db.ExecContext(ctx, query,
+func (r *Repository) save(ctx context.Context, video *models.Video) error {
+	_, err := r.db.statements.insert.ExecContext(ctx,
 		video.ID,
 		video.URL,
+		video.Title,
 		string(video.Status),
 		video.Transcription,
 		video.Error,
 		video.CreatedAt,
 		video.UpdatedAt,
 	)
-	if err != nil {
-		return errors.Internal(op, err, "Failed to save video")
-	}
-
-	return nil
+	return err
 }
 
-func (r *SQLiteRepository) Find(ctx context.Context, id string) (*models.Video, error) {
+func (r *Repository) Find(ctx context.Context, id string) (*models.Video, error) {
 	const op = "SQLiteRepository.Find"
 
-	query := `
-        SELECT id, url, status, transcription, error, created_at, updated_at
-        FROM videos WHERE id = ?
-    `
-
 	video := &models.Video{}
 	var status string
 
-	err := r.db.QueryRowContext(ctx, query, id).Scan(
+	err := r.db.statements.get.QueryRowContext(ctx, id).Scan(
 		&video.ID,
 		&video.URL,
+		&video.Title,
 		&status,
 		&video.Transcription,
 		&video.Error,
@@ -76,20 +75,16 @@ func (r *SQLiteRepository) Find(ctx context.Context, id string) (*models.Video, 
 	return video, nil
 }
 
-func (r *SQLiteRepository) FindByURL(ctx context.Context, url string) (*models.Video, error) {
+func (r *Repository) FindByURL(ctx context.Context, url string) (*models.Video, error) {
 	const op = "SQLiteRepository.FindByURL"
-
-	query := `
-        SELECT id, url, status, transcription, error, created_at, updated_at
-        FROM videos WHERE url = ?
-    `
 
 	video := &models.Video{}
 	var status string
 
-	err := r.db.QueryRowContext(ctx, query, url).Scan(
+	err := r.db.statements.getByURL.QueryRowContext(ctx, url).Scan(
 		&video.ID,
 		&video.URL,
+		&video.Title,
 		&status,
 		&video.Transcription,
 		&video.Error,
@@ -106,4 +101,9 @@ func (r *SQLiteRepository) FindByURL(ctx context.Context, url string) (*models.V
 
 	video.Status = models.Status(status)
 	return video, nil
+}
+
+func isLockError(err error) bool {
+	return strings.Contains(err.Error(), "database is locked") ||
+		strings.Contains(err.Error(), "busy")
 }

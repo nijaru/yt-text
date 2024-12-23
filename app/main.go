@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -22,37 +21,38 @@ import (
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/etag"
 	"github.com/gofiber/fiber/v2/middleware/limiter"
-	fiberLogger "github.com/gofiber/fiber/v2/middleware/logger"
 	"github.com/gofiber/fiber/v2/middleware/recover"
 	"github.com/gofiber/fiber/v2/middleware/requestid"
 	"github.com/gofiber/fiber/v2/middleware/timeout"
 	"github.com/google/uuid"
+	"github.com/rs/zerolog/log"
 )
 
 func main() {
 	// Load configuration
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatalf("Failed to load configuration: %v", err)
+		log.Fatal().Err(err).Msg("Failed to load configuration")
 	}
 
 	// Initialize logger
-	logConfig, err := logger.NewLogger(cfg.LogDir)
+	appLogger, err := logger.NewLogger(cfg.LogDir)
 	if err != nil {
-		log.Fatalf("Failed to initialize logger: %v", err)
+		log.Fatal().Err(err).Msg("Failed to initialize logger")
 	}
+	log.Logger = appLogger.Logger // Set global logger
 
 	// Initialize database
-	db, err := sqlite.InitDB(cfg.Database.Path)
+	db, err := sqlite.NewDB(cfg.Database.Path)
 	if err != nil {
-		log.Fatalf("Failed to initialize database: %v", err)
+		log.Fatal().Err(err).Msg("Failed to initialize database")
 	}
 	defer db.Close()
 
 	// Initialize repository
 	repo, err := sqlite.NewRepository(db)
 	if err != nil {
-		log.Fatalf("Failed to initialize repository: %v", err)
+		log.Fatal().Err(err).Msg("Failed to initialize repository")
 	}
 
 	// Initialize script runner
@@ -63,7 +63,7 @@ func main() {
 		TempDir:     cfg.TempDir,
 	})
 	if err != nil {
-		log.Fatalf("Failed to initialize script runner: %v", err)
+		log.Fatal().Err(err).Msg("Failed to initialize script runner")
 	}
 
 	// Initialize validator
@@ -95,7 +95,7 @@ func main() {
 	})
 
 	// Setup middleware
-	setupMiddleware(app, cfg, logConfig)
+	setupMiddleware(app, cfg, appLogger)
 
 	// Setup routes
 	videoHandler := handlers.NewVideoHandler(videoService)
@@ -117,34 +117,34 @@ func main() {
 
 	go func() {
 		<-shutdownChan
-		log.Println("Shutting down server...")
+		log.Info().Msg("Shutting down server...")
 
 		// Create shutdown context with timeout
 		ctx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 		defer cancel()
 
 		if err := app.ShutdownWithContext(ctx); err != nil {
-			log.Printf("Server shutdown error: %v", err)
+			log.Error().Err(err).Msg("Server shutdown error")
 		}
 
 		// Close any other resources
 		if err := db.Close(); err != nil {
-			log.Printf("Database shutdown error: %v", err)
+			log.Error().Err(err).Msg("Database shutdown error")
 		}
 	}()
 
 	// Start server
 	serverAddr := ":" + cfg.ServerPort
 	if cfg.Debug {
-		log.Printf("Server starting on http://localhost%s", serverAddr)
+		log.Info().Str("addr", "http://localhost"+serverAddr).Msg("Server starting")
 	}
 
 	if err := app.Listen(serverAddr); err != nil && err != http.ErrServerClosed {
-		log.Fatalf("Server error: %v", err)
+		log.Fatal().Err(err).Msg("Server error")
 	}
 }
 
-func setupMiddleware(app *fiber.App, cfg *config.Config, logConfig *fiberLogger.Config) {
+func setupMiddleware(app *fiber.App, cfg *config.Config, logger *logger.Logger) {
 	if cfg.Middleware.EnableRecover {
 		app.Use(recover.New(recover.Config{
 			EnableStackTrace: cfg.Debug,
@@ -161,7 +161,7 @@ func setupMiddleware(app *fiber.App, cfg *config.Config, logConfig *fiberLogger.
 	}
 
 	if cfg.Middleware.EnableLogger {
-		app.Use(fiberLogger.New(*logConfig))
+		app.Use(logger.Middleware())
 	}
 
 	if cfg.Middleware.EnableTimeout {
@@ -230,25 +230,23 @@ func setupRoutes(app *fiber.App, videoService video.Service) {
 }
 
 func startServer(app *fiber.App, cfg *config.Config) {
-	// Graceful shutdown
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 
 	go func() {
 		<-c
-		log.Println("Gracefully shutting down...")
+		log.Info().Msg("Gracefully shutting down...")
 		_ = app.Shutdown()
 	}()
 
-	// Start server
 	if err := app.Listen(":" + cfg.ServerPort); err != nil {
-		log.Fatal(err)
+		log.Fatal().Err(err).Msg("Server error")
 	}
 }
 
 func initializeVideoService(cfg *config.Config) (video.Service, error) {
 	// Initialize repository
-	db, err := sqlite.InitDB(cfg.Database.Path)
+	db, err := sqlite.NewDB(cfg.Database.Path)
 	if err != nil {
 		return nil, err
 	}
