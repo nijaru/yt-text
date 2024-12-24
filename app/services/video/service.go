@@ -7,6 +7,7 @@ import (
 	"yt-text/models"
 	"yt-text/repository"
 	"yt-text/scripts"
+	"yt-text/services/subtitles"
 	"yt-text/validation"
 
 	"github.com/google/uuid"
@@ -16,25 +17,28 @@ import (
 type Repository = repository.VideoRepository
 
 type service struct {
-	repo      Repository
-	scripts   *scripts.ScriptRunner
-	validator *validation.Validator
-	config    Config
-	logger    zerolog.Logger
+	repo            Repository
+	scripts         *scripts.ScriptRunner
+	validator       *validation.Validator
+	config          Config
+	logger          zerolog.Logger
+	subtitleService subtitles.Service
 }
 
 func NewService(
 	repo Repository,
 	scriptRunner *scripts.ScriptRunner,
 	validator *validation.Validator,
+	subtitleService subtitles.Service,
 	config Config,
 ) Service {
 	return &service{
-		repo:      repo,
-		scripts:   scriptRunner,
-		validator: validator,
-		config:    config,
-		logger:    zerolog.New(zerolog.NewConsoleWriter()),
+		repo:            repo,
+		scripts:         scriptRunner,
+		validator:       validator,
+		subtitleService: subtitleService,
+		config:          config,
+		logger:          zerolog.New(zerolog.NewConsoleWriter()),
 	}
 }
 
@@ -148,12 +152,36 @@ func (s *service) processVideo(video *models.Video) {
 
 	logger.Info().Msg("Starting transcription process")
 
-	// Set up transcription options
+	// First try to get subtitles
+	subtitleInfo, err := s.subtitleService.GetAvailable(ctx, video.URL)
+	if err == nil && subtitleInfo.Available {
+		// Try auto-generated subtitles first since they're often available
+		if tracks, ok := subtitleInfo.AutoSubtitles["en"]; ok && len(tracks) > 0 {
+			text, err := s.subtitleService.Download(ctx, video.URL, "en", true)
+			if err == nil && text != "" {
+				s.updateVideoWithTranscription(video, text, subtitleInfo.Title)
+				return
+			}
+			logger.Warn().Err(err).Msg("Failed to get auto-generated subtitles")
+		}
+
+		// Try manual subtitles as fallback
+		if tracks, ok := subtitleInfo.Subtitles["en"]; ok && len(tracks) > 0 {
+			text, err := s.subtitleService.Download(ctx, video.URL, "en", false)
+			if err == nil && text != "" {
+				s.updateVideoWithTranscription(video, text, subtitleInfo.Title)
+				return
+			}
+			logger.Warn().Err(err).Msg("Failed to get manual subtitles")
+		}
+	}
+
+	// Fallback to transcription if no subtitles available or failed
+	logger.Info().Msg("No subtitles available or failed to get them, falling back to transcription")
 	opts := map[string]string{
 		"model": s.config.DefaultModel,
 	}
 
-	// Perform transcription
 	result, err := s.scripts.Transcribe(ctx, video.URL, opts, true)
 	if err != nil {
 		logger.Error().Err(err).Msg("Transcription failed")
@@ -169,7 +197,6 @@ func (s *service) processVideo(video *models.Video) {
 			video.Title = video.URL
 		}
 
-		// Add debug logging
 		logger.Info().
 			Int("transcription_length", len(video.Transcription)).
 			Str("title", video.Title).
@@ -179,16 +206,25 @@ func (s *service) processVideo(video *models.Video) {
 
 	video.UpdatedAt = time.Now()
 
-	// Update video record
 	if err := s.repo.Save(ctx, video); err != nil {
 		logger.Error().Err(err).Msg("Failed to save transcription result")
 	} else {
-		// Add debug logging after save
 		logger.Info().
 			Int("transcription_length", len(video.Transcription)).
 			Str("title", video.Title).
 			Str("status", string(video.Status)).
 			Time("updated_at", video.UpdatedAt).
 			Msg("Saved video with transcription")
+	}
+}
+
+func (s *service) updateVideoWithTranscription(video *models.Video, text string, title string) {
+	video.Status = models.StatusCompleted
+	video.Transcription = text
+	video.Title = title
+	video.UpdatedAt = time.Now()
+
+	if err := s.repo.Save(context.Background(), video); err != nil {
+		s.logger.Error().Err(err).Msg("Failed to save video with subtitles")
 	}
 }

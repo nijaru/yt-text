@@ -30,10 +30,14 @@ services:
       - MIDDLEWARE_ENABLE_COMPRESS=false
       - MIDDLEWARE_ENABLE_ETAG=false
       - MIDDLEWARE_ENABLE_DEBUG_MODE=true
+      - TMPDIR=/tmp/yt-text
     ports:
       - "8080:8080"
+    volumes:
+      - temp-data:/tmp/yt-text
     tmpfs:
       - /tmp
+      - /tmp/yt-text
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s
@@ -48,3 +52,6 @@ services:
 networks:
   default:
     driver: bridge
+
+volumes:
+  temp-data:

@@ -8,7 +8,7 @@ func (r *ScriptRunner) Validate(ctx context.Context, url string) (VideoInfo, err
 	const op = "ScriptRunner.Validate"
 	var result VideoInfo
 
-	output, err := r.runScript(ctx, "validate.py", map[string]string{
+	output, err := r.RunScript(ctx, "validate.py", map[string]string{
 		"url": url,
 	}, nil)
 	if err != nil {
