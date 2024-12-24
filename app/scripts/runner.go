@@ -40,13 +40,13 @@ func validateConfig(cfg Config) error {
 	return nil
 }
 
-func (r *ScriptRunner) runScript(
+func (r *ScriptRunner) RunScript(
 	ctx context.Context,
 	scriptName string,
 	args map[string]string,
 	flags []string,
 ) ([]byte, error) {
-	const op = "ScriptRunner.runScript"
+	const op = "ScriptRunner.RunScript"
 	scriptPath := filepath.Join(r.config.ScriptsPath, scriptName)
 	logger := zerolog.Ctx(ctx)
 

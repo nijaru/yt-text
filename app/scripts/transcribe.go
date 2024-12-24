@@ -24,7 +24,7 @@ func (r *ScriptRunner) Transcribe(
 	args := buildTranscribeArgs(url, opts)
 	flags := buildTranscribeFlags(enableConstraints)
 
-	output, err := r.runScript(ctx, "api.py", args, flags)
+	output, err := r.RunScript(ctx, "api.py", args, flags)
 	if err != nil {
 		return result, newScriptError(op, err, "transcription failed")
 	}

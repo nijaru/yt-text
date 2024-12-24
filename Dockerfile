@@ -34,9 +34,9 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/
 WORKDIR /app
 
 # Create and set up directories
-RUN mkdir -p /tmp/uv-cache /app/logs /app/data /tmp/transcribe \
-    && chown -R appuser:appuser /app /tmp/transcribe /tmp/uv-cache \
-    && chmod -R 755 /tmp/transcribe
+RUN mkdir -p /tmp/uv-cache /app/logs /app/data /tmp/transcribe /tmp/yt-text \
+    && chown -R appuser:appuser /app /tmp/transcribe /tmp/uv-cache /tmp/yt-text \
+    && chmod -R 755 /tmp/transcribe /tmp/yt-text
 
 # Install dependencies in venv using uv
 COPY python/pyproject.toml ./

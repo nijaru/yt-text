@@ -141,7 +141,7 @@ class Transcriber:
             start_time = time.time()
             segments, info = self.model.transcribe(
                 audio_path,
-                beam_size=3,
+                beam_size=5,
                 temperature=0.2,
                 best_of=1,
                 condition_on_previous_text=True,

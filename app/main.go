@@ -13,6 +13,7 @@ import (
 	"yt-text/logger"
 	"yt-text/repository/sqlite"
 	"yt-text/scripts"
+	"yt-text/services/subtitles"
 	"yt-text/services/video"
 	"yt-text/validation"
 
@@ -42,44 +43,14 @@ func main() {
 	}
 	log.Logger = appLogger.Logger // Set global logger
 
-	// Initialize database
-	db, err := sqlite.NewDB(cfg.Database.Path)
-	if err != nil {
-		log.Fatal().Err(err).Msg("Failed to initialize database")
-	}
-	defer db.Close()
-
-	// Initialize repository
-	repo, err := sqlite.NewRepository(db)
-	if err != nil {
-		log.Fatal().Err(err).Msg("Failed to initialize repository")
-	}
-
-	// Initialize script runner
-	scriptRunner, err := scripts.NewScriptRunner(scripts.Config{
-		PythonPath:  cfg.Video.PythonPath,
-		ScriptsPath: cfg.Video.ScriptsPath,
-		Timeout:     cfg.Video.ProcessTimeout,
-		TempDir:     cfg.TempDir,
-	})
-	if err != nil {
-		log.Fatal().Err(err).Msg("Failed to initialize script runner")
-	}
-
-	// Initialize validator
-	validator := validation.NewValidator(cfg)
-
 	// Initialize video service
-	videoService := video.NewService(
-		repo,
-		scriptRunner,
-		validator,
-		video.Config{
-			ProcessTimeout: cfg.Video.ProcessTimeout,
-			MaxDuration:    cfg.Video.MaxDuration,
-			DefaultModel:   cfg.Video.DefaultModel,
-		},
-	)
+	videoService, db, err := initializeVideoService(cfg)
+	if err != nil {
+		log.Fatal().Err(err).Msg("Failed to initialize video service")
+	}
+
+	// Close database connection on exit
+	defer db.Close()
 
 	// Initialize Fiber app
 	app := fiber.New(fiber.Config{
@@ -244,16 +215,17 @@ func startServer(app *fiber.App, cfg *config.Config) {
 	}
 }
 
-func initializeVideoService(cfg *config.Config) (video.Service, error) {
-	// Initialize repository
+func initializeVideoService(cfg *config.Config) (video.Service, *sqlite.DB, error) {
+	// Initialize database
 	db, err := sqlite.NewDB(cfg.Database.Path)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
+	// Initialize repository
 	repo, err := sqlite.NewRepository(db)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// Initialize script runner
@@ -264,16 +236,27 @@ func initializeVideoService(cfg *config.Config) (video.Service, error) {
 		TempDir:     cfg.TempDir,
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// Initialize validator
 	validator := validation.NewValidator(cfg)
 
+	// Initialize subtitle service
+	subtitleService := subtitles.NewService(scriptRunner)
+
 	// Create and return video service
-	return video.NewService(repo, scriptRunner, validator, video.Config{
-		ProcessTimeout: cfg.Video.ProcessTimeout,
-		MaxDuration:    cfg.Video.MaxDuration,
-		DefaultModel:   cfg.Video.DefaultModel,
-	}), nil
+	videoService := video.NewService(
+		repo,
+		scriptRunner,
+		validator,
+		subtitleService,
+		video.Config{
+			ProcessTimeout: cfg.Video.ProcessTimeout,
+			MaxDuration:    cfg.Video.MaxDuration,
+			DefaultModel:   cfg.Video.DefaultModel,
+		},
+	)
+
+	return videoService, db, nil
 }
