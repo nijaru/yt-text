@@ -58,7 +58,7 @@ func main() {
 		WriteTimeout: cfg.WriteTimeout,
 		IdleTimeout:  cfg.IdleTimeout,
 		ErrorHandler: handlers.ErrorHandler,
-		// Optional additional configurations
+
 		DisableStartupMessage: !cfg.Debug,
 		StrictRouting:         true,
 		CaseSensitive:         true,
