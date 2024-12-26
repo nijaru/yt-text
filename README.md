@@ -2,7 +2,7 @@
 
 A tool that combines [yt-dlp](https://github.com/yt-dlp/yt-dlp) and [Faster Whisper](https://github.com/guillaumekln/faster-whisper) to convert videos to text. It operates as a web server that accepts URLs from YouTube or any other platform supported by yt-dlp (such as Vimeo, Twitter, TikTok, etc.) and returns the video's transcript.
 
-A standalone version for direct command-line usage is available at `yt-text/python/scripts/ytext.py`.
+A standalone version for direct command-line usage is available at `python/scripts/ytext.py`.
 
 ## Features
 
@@ -11,33 +11,44 @@ A standalone version for direct command-line usage is available at `yt-text/pyth
 - Web server interface for easy URL submission
 - Support for various Whisper models
 - JSON output
-- GPU acceleration when available
 
 ## Installation
 
 1. Clone the repository:
 
    ```sh
-   git clone https://github.com/yourusername/yt-text.git
+   git clone https://github.com/nijaru/yt-text.git
    cd yt-text
+   ```
+
+2. Install dependencies using uv (recommended):
+
+   ```sh
+   cd python && uv sync
    ```
 
 ## Usage
 
 ### Command Line
 
-The script `ytext.py` provides a simple interface for downloading audio and transcribing it to text. You can provide any number of urls as separate arguments or as comma-separated values. They can either be passed in directly or by using `--url`.
-
-The script should support any URLs supported by yt-dlp, including YouTube, Vimeo, Twitter, and TikTok. The script will download the audio from the video and transcribe it to text using the specified Whisper model. The default model is `base.en` for English with a good balance of speed and accuracy.
-
-Dependencies are listed in the `requirements.txt` file. You can install them using pip or simply run the script with [uv](https://github.com/astral-sh/uv).
+The script `ytext.py` provides a simple interface for downloading audio and transcribing it to text. You can provide the URL either as a positional argument or with the `--url` flag:
 
 ```sh
-python3 ytext.py <youtube-url>
+uv run scripts/ytext.py <youtube-url>
+uv run scripts/ytext.py --url <youtube-url>    # same as above
 ```
 
+Multiple URLs can be provided either as comma-separated values or as separate arguments:
+
 ```sh
-python3 ytext.py --url <youtube-url>
+uv run scripts/ytext.py url1,url2,url3
+uv run scripts/ytext.py url1 url2 url3         # same as above
+```
+
+You can also run it directly with Python after installing dependencies and ensuring you are using a supported version of Python:
+
+```sh
+python3 scripts/ytext.py <youtube-url>
 ```
 
 ### Options
@@ -56,9 +67,9 @@ The script supports various Whisper models:
 
 Language-specific models are also available (e.g., `base.en` for English-optimized model).
 
-### Web Server
+## Web Server
 
-#### Docker (Recommended)
+### Docker (Recommended)
 
 In order to run the web server using Docker, you need to have Docker installed on your system. There is a Dockerfile and docker-compose.yml file included in the repository. The server can be run manually, but this is not actively tested.
 
@@ -67,15 +78,6 @@ In order to run the web server using Docker, you need to have Docker installed o
    ```sh
    docker-compose up --build
    ```
-
-## Notes
-
-The python code was recently refactored to add a standalone script with the same functionality as the web server. The refactor is not yet complete and needs to be tested. The manual server instructions have not yet been retested and may not work. The Makefile has not been updated to reflect the changes in the project structure. Docker is the recommend way of running the web server. The script should work standalone as long as the dependencies are installed.
-
-## Limitations
-
-- GPU acceleration requires CUDA-compatible hardware
-  - Can use CPU if not available
 
 ## License
 
