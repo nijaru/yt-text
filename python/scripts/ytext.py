@@ -354,8 +354,19 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "--model",
         type=str,
-        default="base.en",
-        help="Whisper model to use for transcription (e.g., 'base.en', 'small', 'medium', 'large').",
+        default="large-v3-turbo",
+        help="Whisper model to use for transcription (e.g., 'large-v3-turbo', 'medium', 'small').",
+    )
+    parser.add_argument(
+        "--prompt",
+        type=str,
+        help="Initial prompt to guide transcription (helpful for technical content).",
+    )
+    parser.add_argument(
+        "--chunk-length",
+        type=int,
+        default=120,
+        help="Length in seconds for chunking long videos (default: 120)",
     )
     return parser.parse_args()
 
@@ -382,23 +393,24 @@ def get_urls(args: argparse.Namespace) -> list:
     return urls
 
 
-def initialize_transcriber(model_name: str) -> Transcriber:
+def initialize_transcriber(args: argparse.Namespace) -> Transcriber:
     """
-    Initialize the Transcriber with the specified model.
+    Initialize the Transcriber with the specified options.
 
     Args:
-        model_name (str): Name of the Whisper model to use.
+        args (argparse.Namespace): Command line arguments containing model and options.
 
     Returns:
         Transcriber: Initialized Transcriber instance.
     """
-    device = "cuda" if torch.cuda.is_available() else "cpu"
     return Transcriber(
-        model_name=model_name,
-        device=device,
-        compute_type="float16" if device == "cuda" else "float32",
+        model_name=args.model,
+        device=None,  # Will be auto-detected based on hardware
+        compute_type=None,  # Will be auto-optimized
         max_video_duration=None,
         max_file_size=None,
+        chunk_length_seconds=args.chunk_length,
+        initial_prompt=args.prompt,
     )
 
 
@@ -453,8 +465,8 @@ def main():
     mapping_file = transcripts_dir / ".ytext_url_mapping.json"  # Hidden file
     mapping = load_url_mapping(mapping_file)
 
-    # Initialize Transcriber with the specified model
-    transcriber = initialize_transcriber(args.model)
+    # Initialize Transcriber with the specified options
+    transcriber = initialize_transcriber(args)
 
     summary = {}
 

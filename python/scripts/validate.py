@@ -80,10 +80,23 @@ def validate_url(url: str) -> dict:
 
     except yt_dlp.utils.DownloadError as e:
         result["error"] = f"Download error: {str(e)}"
+        result["valid"] = False
     except ValidationError as ve:
         result["error"] = str(ve)
+        result["valid"] = False
+    except requests.exceptions.RequestException as e:
+        result["error"] = f"Network error: {str(e)}"
+        result["valid"] = False
+    except OSError as e:
+        result["error"] = f"File system error: {str(e)}"
+        result["valid"] = False
+    except json.JSONDecodeError as e:
+        result["error"] = f"Invalid JSON: {str(e)}"
+        result["valid"] = False
     except Exception as e:
-        result["error"] = f"Unexpected error: {str(e)}"
+        import traceback
+        result["error"] = f"Unexpected error: {str(e)}\n{traceback.format_exc()}"
+        result["valid"] = False
 
     return result
 

@@ -1,3 +1,7 @@
-faster-whisper
-torch
-yt_dlp
+faster-whisper>=0.10.0
+torch>=2.0.0
+yt_dlp>=2023.3.4
+psutil>=5.9.0
+numpy>=1.22.0
+librosa>=0.10.0
+soundfile>=0.12.1

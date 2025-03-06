@@ -67,21 +67,59 @@ func setupDB(db *sql.DB) error {
 }
 
 func createTables(db *sql.DB) error {
-	_, err := db.Exec(`
-        CREATE TABLE IF NOT EXISTS videos (
-            id TEXT PRIMARY KEY,
-            url TEXT UNIQUE NOT NULL,
-            title TEXT,
-            status TEXT NOT NULL,
-            transcription TEXT,
-            error TEXT,
-            created_at DATETIME NOT NULL,
-            updated_at DATETIME NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS idx_videos_url ON videos(url);
-        CREATE INDEX IF NOT EXISTS idx_videos_status ON videos(status);
-    `)
-	return err
+	// First check if we need to migrate the schema
+	var count int
+	err := db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='videos'").Scan(&count)
+	if err != nil {
+		return err
+	}
+	
+	if count > 0 {
+		// Table exists, check if we need to add columns
+		var columnCount int
+		err = db.QueryRow("SELECT COUNT(*) FROM pragma_table_info('videos') WHERE name='language'").Scan(&columnCount)
+		if err != nil {
+			return err
+		}
+		
+		if columnCount == 0 {
+			// Need to add new columns
+			_, err = db.Exec(`
+				ALTER TABLE videos ADD COLUMN language TEXT;
+				ALTER TABLE videos ADD COLUMN language_probability REAL;
+				ALTER TABLE videos ADD COLUMN model_name TEXT;
+				CREATE INDEX IF NOT EXISTS idx_videos_language ON videos(language);
+			`)
+			if err != nil {
+				return err
+			}
+		}
+	} else {
+		// Create table with all columns
+		_, err = db.Exec(`
+			CREATE TABLE IF NOT EXISTS videos (
+				id TEXT PRIMARY KEY,
+				url TEXT UNIQUE NOT NULL,
+				title TEXT,
+				status TEXT NOT NULL,
+				transcription TEXT,
+				error TEXT,
+				language TEXT,
+				language_probability REAL,
+				model_name TEXT,
+				created_at DATETIME NOT NULL,
+				updated_at DATETIME NOT NULL
+			);
+			CREATE INDEX IF NOT EXISTS idx_videos_url ON videos(url);
+			CREATE INDEX IF NOT EXISTS idx_videos_status ON videos(status);
+			CREATE INDEX IF NOT EXISTS idx_videos_language ON videos(language);
+		`)
+		if err != nil {
+			return err
+		}
+	}
+	
+	return nil
 }
 
 func prepareStatements(db *sql.DB) (*statements, error) {

@@ -64,13 +64,14 @@ type DatabaseConfig struct {
 }
 
 type VideoConfig struct {
-	ProcessTimeout time.Duration `json:"process_timeout"`
-	MaxDuration    time.Duration `json:"max_duration"`
-	// MaxFileSize    int64         `json:"max_file_size"`
-	DefaultModel string   `json:"default_model"`
-	PythonPath   string   `json:"python_path"`
-	ScriptsPath  string   `json:"scripts_path"`
-	Environment  []string `json:"environment"`
+	ProcessTimeout      time.Duration `json:"process_timeout"`
+	MaxDuration         time.Duration `json:"max_duration"`
+	// MaxFileSize       int64         `json:"max_file_size"`
+	DefaultModel        string   `json:"default_model"`
+	PythonPath          string   `json:"python_path"`
+	ScriptsPath         string   `json:"scripts_path"`
+	Environment         []string `json:"environment"`
+	AllowNonYouTubeURLs bool     `json:"allow_non_youtube_urls"`
 }
 
 type CORSConfig struct {
@@ -168,12 +169,13 @@ func Load() (*Config, error) {
 
 		// Video Service
 		Video: VideoConfig{
-			ProcessTimeout: getEnvAsDuration("VIDEO_PROCESS_TIMEOUT", 30*time.Minute),
-			MaxDuration:    getEnvAsDuration("VIDEO_MAX_DURATION", 4*time.Hour),
-			// MaxFileSize:    getEnvAsInt64("VIDEO_MAX_FILE_SIZE", 100*1024*1024), // 100MB
-			DefaultModel: getEnv("WHISPER_MODEL", "base.en"),
-			PythonPath:   getEnv("PYTHON_PATH", "python3"),
-			ScriptsPath:  getEnv("SCRIPTS_PATH", "./scripts"),
+			ProcessTimeout:      getEnvAsDuration("VIDEO_PROCESS_TIMEOUT", 30*time.Minute),
+			MaxDuration:         getEnvAsDuration("VIDEO_MAX_DURATION", 4*time.Hour),
+			// MaxFileSize:      getEnvAsInt64("VIDEO_MAX_FILE_SIZE", 100*1024*1024), // 100MB
+			DefaultModel:        getEnv("WHISPER_MODEL", "large-v3-turbo"),
+			PythonPath:          getEnv("PYTHON_PATH", "python3"),
+			ScriptsPath:         getEnv("SCRIPTS_PATH", "./scripts"),
+			AllowNonYouTubeURLs: getEnvAsBool("ALLOW_NON_YOUTUBE_URLS", false),
 		},
 
 		// Middleware
@@ -222,7 +224,7 @@ func validatePaths(c *Config) error {
 	}
 
 	for _, p := range paths {
-		if err := os.MkdirAll(p.path, 0755); err != nil {
+		if err := os.MkdirAll(p.path, 0750); err != nil {
 			return fmt.Errorf("failed to create %s: %w", p.name, err)
 		}
 	}
@@ -237,6 +239,15 @@ func validateTimeouts(c *Config) error {
 	if c.WriteTimeout <= 0 {
 		return fmt.Errorf("write timeout must be positive")
 	}
+	if c.IdleTimeout <= 0 {
+		return fmt.Errorf("idle timeout must be positive")
+	}
+	if c.ShutdownTimeout <= 0 {
+		return fmt.Errorf("shutdown timeout must be positive")
+	}
+	if c.RequestTimeout <= 0 {
+		return fmt.Errorf("request timeout must be positive")
+	}
 	return nil
 }
 
@@ -244,6 +255,38 @@ func validateServices(c *Config) error {
 	if c.Video.MaxDuration <= 0 {
 		return fmt.Errorf("max video duration must be positive")
 	}
+	
+	// Validate that ScriptsPath exists and contains required scripts
+	if c.Video.ScriptsPath != "" {
+		scriptsPath := c.Video.ScriptsPath
+		if !filepath.IsAbs(scriptsPath) {
+			// Convert to absolute path if relative
+			absPath, err := filepath.Abs(scriptsPath)
+			if err != nil {
+				return fmt.Errorf("failed to resolve scripts path: %w", err)
+			}
+			scriptsPath = absPath
+		}
+		
+		// Check if scripts directory exists
+		info, err := os.Stat(scriptsPath)
+		if err != nil {
+			return fmt.Errorf("scripts path error: %w", err)
+		}
+		if !info.IsDir() {
+			return fmt.Errorf("scripts path is not a directory")
+		}
+		
+		// Check for required script files
+		requiredScripts := []string{"validate.py", "transcription.py"}
+		for _, script := range requiredScripts {
+			scriptPath := filepath.Join(scriptsPath, script)
+			if _, err := os.Stat(scriptPath); err != nil {
+				return fmt.Errorf("required script not found: %s", script)
+			}
+		}
+	}
+	
 	return nil
 }
 

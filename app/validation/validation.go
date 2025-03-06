@@ -25,6 +25,9 @@ func (v *Validator) ValidateURL(urlStr string) error {
 		return errors.InvalidInput(op, nil, "URL is required")
 	}
 
+	// Sanitize URL by trimming spaces
+	urlStr = strings.TrimSpace(urlStr)
+	
 	// Parse URL
 	parsedURL, err := url.Parse(urlStr)
 	if err != nil {
@@ -36,10 +39,23 @@ func (v *Validator) ValidateURL(urlStr string) error {
 		return errors.InvalidInput(op, nil, "URL must use HTTP or HTTPS")
 	}
 
+	// Basic domain security check
+	if strings.Contains(parsedURL.Hostname(), "localhost") || 
+	   strings.Contains(parsedURL.Hostname(), "127.0.0.1") || 
+	   strings.Contains(parsedURL.Hostname(), "::1") {
+		return errors.InvalidInput(op, nil, "Local addresses are not permitted")
+	}
+
 	// If it's a YouTube URL, perform additional validation
 	if isYouTubeDomain(parsedURL.Hostname()) {
 		if err := v.validateYouTubeURL(parsedURL); err != nil {
 			return err
+		}
+	} else {
+		// For non-YouTube URLs, validate that domain is allowed in config
+		// This is a basic check - add more platform validations as needed
+		if !v.config.Video.AllowNonYouTubeURLs {
+			return errors.InvalidInput(op, nil, "Only YouTube URLs are currently supported")
 		}
 	}
 
@@ -52,6 +68,10 @@ func isYouTubeDomain(host string) bool {
 		"youtube.com",
 		"www.youtube.com",
 		"youtu.be",
+		"m.youtube.com",
+		"mobile.youtube.com",
+		"music.youtube.com",
+		"gaming.youtube.com",
 	}
 
 	for _, domain := range validDomains {
@@ -66,26 +86,46 @@ func isYouTubeDomain(host string) bool {
 func (v *Validator) validateYouTubeURL(parsedURL *url.URL) error {
 	const op = "Validator.validateYouTubeURL"
 
-	// Handle youtu.be format
+	// Handle youtu.be format (short URLs)
 	if parsedURL.Host == "youtu.be" {
-		if parsedURL.Path == "" || parsedURL.Path == "/" {
+		// Extract video ID from path (remove leading slash)
+		videoID := strings.TrimPrefix(parsedURL.Path, "/")
+		if videoID == "" {
 			return errors.InvalidInput(op, nil, "Invalid YouTube short URL format")
 		}
 		return nil
 	}
 
-	// Handle youtube.com format
-	if parsedURL.Path != "/watch" {
-		return errors.InvalidInput(op, nil, "Invalid YouTube URL format")
+	// Handle YouTube Shorts
+	if strings.HasPrefix(parsedURL.Path, "/shorts/") {
+		videoID := strings.TrimPrefix(parsedURL.Path, "/shorts/")
+		if videoID == "" {
+			return errors.InvalidInput(op, nil, "Invalid YouTube Shorts URL format")
+		}
+		return nil
 	}
 
-	query := parsedURL.Query()
-	videoID := query.Get("v")
-	if videoID == "" {
-		return errors.InvalidInput(op, nil, "Missing YouTube video ID")
+	// Handle embedded videos
+	if strings.HasPrefix(parsedURL.Path, "/embed/") {
+		videoID := strings.TrimPrefix(parsedURL.Path, "/embed/")
+		if videoID == "" {
+			return errors.InvalidInput(op, nil, "Invalid YouTube embed URL format")
+		}
+		return nil
 	}
 
-	return nil
+	// Handle standard youtube.com/watch format
+	if parsedURL.Path == "/watch" {
+		query := parsedURL.Query()
+		videoID := query.Get("v")
+		if videoID == "" {
+			return errors.InvalidInput(op, nil, "Missing YouTube video ID")
+		}
+		return nil
+	}
+
+	// If not a recognized format
+	return errors.InvalidInput(op, nil, "Unsupported YouTube URL format")
 }
 
 // RequestValidationOpts holds options for request validation

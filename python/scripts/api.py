@@ -10,11 +10,22 @@ def main():
     parser.add_argument(
         "--url", type=str, required=True, help="Media URL(s), comma-separated"
     )
-    parser.add_argument("--model", default="base.en", help="Whisper model to use")
+    parser.add_argument("--model", default="large-v3-turbo", help="Whisper model to use")
     parser.add_argument(
         "--enable_constraints",
         action="store_true",
         help="Enable video duration and file size constraints",
+    )
+    parser.add_argument(
+        "--prompt",
+        type=str,
+        help="Initial prompt to guide transcription (helpful for technical content)",
+    )
+    parser.add_argument(
+        "--chunk_length",
+        type=int,
+        default=120,
+        help="Length in seconds for chunking long videos (default: 120)",
     )
     args = parser.parse_args()
 
@@ -29,6 +40,8 @@ def main():
             "error": "No valid URLs provided.",
             "title": None,
             "url": None,
+            "language": None,
+            "language_probability": 0,
         }
         print(json.dumps(error_response))
         sys.exit(1)
@@ -44,6 +57,8 @@ def main():
             model_name=args.model,
             max_video_duration=4 * 3600 if args.enable_constraints else None,
             max_file_size=100 * 1024 * 1024 if args.enable_constraints else None,
+            chunk_length_seconds=args.chunk_length,
+            initial_prompt=args.prompt,
         )
 
         results = []
@@ -68,6 +83,8 @@ def main():
                 "error": output.get("error"),
                 "title": output.get("title"),
                 "url": output.get("url"),
+                "language": output.get("language"),
+                "language_probability": output.get("language_probability", 0),
             }
         else:
             # Handle list of results
@@ -80,6 +97,8 @@ def main():
                     "error": item.get("error"),
                     "title": item.get("title"),
                     "url": item.get("url"),
+                    "language": item.get("language"),
+                    "language_probability": item.get("language_probability", 0),
                 }
                 formatted_result.append(formatted_item)
 
@@ -92,6 +111,8 @@ def main():
             "error": f"Unexpected error: {e}",
             "title": None,
             "url": urls[0] if urls else None,
+            "language": None,
+            "language_probability": 0,
         }
 
     finally:

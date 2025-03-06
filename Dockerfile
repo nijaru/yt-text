@@ -1,4 +1,4 @@
-FROM golang:1.23 AS builder
+FROM golang:1.24 AS builder
 WORKDIR /src
 
 ENV GO111MODULE=on
@@ -40,7 +40,7 @@ RUN mkdir -p /tmp/uv-cache /app/logs /app/data /tmp/transcribe \
 
 # Install dependencies in venv using uv
 COPY python/pyproject.toml ./
-RUN uv sync
+RUN uv sync && echo "Python dependencies installed successfully" || exit 1
 
 # Copy application files
 COPY python/scripts/*.py /app/scripts/

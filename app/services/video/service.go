@@ -143,18 +143,95 @@ func (s *service) GetTranscription(ctx context.Context, id string) (*models.Vide
 
 func (s *service) processVideo(video *models.Video) {
 	logger := s.logger.With().Str("video_id", video.ID).Logger()
+	
+	// Create context with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), s.config.ProcessTimeout)
 	defer cancel()
+	
+	// Create a done channel to track completion
+	done := make(chan struct{})
+	
+	// Run transcription in a separate goroutine to handle timeout properly
+	go func() {
+		s.doProcessVideo(ctx, video, logger)
+		close(done)
+	}()
+	
+	// Wait for either completion or timeout
+	select {
+	case <-done:
+		logger.Info().Msg("Transcription processing completed")
+	case <-ctx.Done():
+		// Context timed out
+		logger.Error().Msg("Transcription processing timed out")
+		video.Status = models.StatusFailed
+		video.Error = "Processing timed out"
+		video.UpdatedAt = time.Now()
+		
+		// Update video record with timeout error
+		if err := s.repo.Save(context.Background(), video); err != nil {
+			logger.Error().Err(err).Msg("Failed to save timeout status")
+		}
+	}
+}
 
+func (s *service) doProcessVideo(ctx context.Context, video *models.Video, logger zerolog.Logger) {
 	logger.Info().Msg("Starting transcription process")
+
+	// Check if context is already canceled before starting
+	if ctx.Err() != nil {
+		logger.Warn().Err(ctx.Err()).Msg("Context already canceled before transcription started")
+		video.Status = models.StatusFailed
+		video.Error = "Processing timed out before it could start"
+		video.UpdatedAt = time.Now()
+		
+		// Use a new background context for saving the error state
+		saveCtx, saveCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer saveCancel()
+		
+		if err := s.repo.Save(saveCtx, video); err != nil {
+			logger.Error().Err(err).Msg("Failed to save error state")
+		}
+		return
+	}
+
+	// Mark as processing
+	video.Status = models.StatusProcessing
+	video.UpdatedAt = time.Now()
+	
+	// Update processing status
+	saveCtx, saveCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	if err := s.repo.Save(saveCtx, video); err != nil {
+		logger.Error().Err(err).Msg("Failed to save processing status")
+	}
+	saveCancel()
 
 	// Set up transcription options
 	opts := map[string]string{
 		"model": s.config.DefaultModel,
+		"chunk_length": "120", // Default 2-minute chunks
 	}
 
 	// Perform transcription
 	result, err := s.scripts.Transcribe(ctx, video.URL, opts, true)
+	
+	// Check if context was canceled during transcription
+	if ctx.Err() != nil {
+		logger.Warn().Err(ctx.Err()).Msg("Context canceled during transcription")
+		video.Status = models.StatusFailed
+		video.Error = "Processing timed out"
+		video.UpdatedAt = time.Now()
+		
+		// Use a new background context for saving the error state
+		saveCtx, saveCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer saveCancel()
+		
+		if err := s.repo.Save(saveCtx, video); err != nil {
+			logger.Error().Err(err).Msg("Failed to save timeout state")
+		}
+		return
+	}
+	
 	if err != nil {
 		logger.Error().Err(err).Msg("Transcription failed")
 		video.Status = models.StatusFailed
@@ -163,30 +240,47 @@ func (s *service) processVideo(video *models.Video) {
 		logger.Info().Msg("Transcription completed successfully")
 		video.Status = models.StatusCompleted
 		video.Transcription = result.Text
+		video.ModelName = result.ModelName
+		
 		if result.Title != nil {
 			video.Title = *result.Title
 		} else {
 			video.Title = video.URL
+		}
+		
+		// Add language information if available
+		if result.Language != nil {
+			video.Language = *result.Language
+			video.LanguageProbability = result.LanguageProbability
 		}
 
 		// Add debug logging
 		logger.Info().
 			Int("transcription_length", len(video.Transcription)).
 			Str("title", video.Title).
+			Str("model", video.ModelName).
+			Str("language", video.Language).
+			Float64("language_probability", video.LanguageProbability).
 			Str("status", string(video.Status)).
 			Msg("Updated video with transcription")
 	}
 
 	video.UpdatedAt = time.Now()
 
+	// Use a new context for saving to ensure it completes even if original context is canceled
+	finalCtx, finalCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer finalCancel()
+	
 	// Update video record
-	if err := s.repo.Save(ctx, video); err != nil {
+	if err := s.repo.Save(finalCtx, video); err != nil {
 		logger.Error().Err(err).Msg("Failed to save transcription result")
 	} else {
 		// Add debug logging after save
 		logger.Info().
 			Int("transcription_length", len(video.Transcription)).
 			Str("title", video.Title).
+			Str("model", video.ModelName).
+			Str("language", video.Language).
 			Str("status", string(video.Status)).
 			Time("updated_at", video.UpdatedAt).
 			Msg("Saved video with transcription")

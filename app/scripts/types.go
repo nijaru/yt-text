@@ -15,12 +15,12 @@ type Config struct {
 }
 
 // GetDefaultModel returns the default model from the configuration or a fallback value.
-// If no model is specified in the configuration, it returns "base.en".
+// If no model is specified in the configuration, it returns "large-v3-turbo".
 func (cfg *Config) GetDefaultModel() string {
 	if cfg.Model != "" {
 		return cfg.Model
 	}
-	return "base.en"
+	return "large-v3-turbo"
 }
 
 // VideoInfo represents the validation result from the Python validation script
@@ -34,10 +34,12 @@ type VideoInfo struct {
 
 // TranscriptionResult represents the transcription output from the Python API script
 type TranscriptionResult struct {
-	Text      string  `json:"text"`            // The transcribed text
-	ModelName string  `json:"model_name"`      // Name of the Whisper model used
-	Duration  float64 `json:"duration"`        // Time taken to transcribe in seconds
-	Error     string  `json:"error,omitempty"` // Error message if transcription failed
-	Title     *string `json:"title,omitempty"` // Title of the video if available
-	URL       *string `json:"url,omitempty"`   // Original URL that was transcribed
+	Text                string  `json:"text"`                      // The transcribed text
+	ModelName           string  `json:"model_name"`                // Name of the Whisper model used
+	Duration            float64 `json:"duration"`                  // Time taken to transcribe in seconds
+	Error               string  `json:"error,omitempty"`           // Error message if transcription failed
+	Title               *string `json:"title,omitempty"`           // Title of the video if available
+	URL                 *string `json:"url,omitempty"`             // Original URL that was transcribed
+	Language            *string `json:"language,omitempty"`        // Detected language code
+	LanguageProbability float64 `json:"language_probability,omitempty"` // Confidence of language detection
 }
