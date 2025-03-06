@@ -276,7 +276,7 @@ class Transcriber:
                 if segment_count > 1:
                     print(f"{progress_text} (temperature={temp})")
                 
-                return self.model.transcribe(
+                result = self.model.transcribe(
                     audio_path,
                     beam_size=5,  # Optimal as requested
                     temperature=temp,
@@ -293,6 +293,16 @@ class Transcriber:
                     task="transcribe",
                     batch_size=self.batch_size,
                 )
+                
+                # Debug info
+                segments_list = list(result[0])
+                print(f"DEBUG: Detected {len(segments_list)} segments")
+                if len(segments_list) > 0:
+                    print(f"DEBUG: First segment sample: {segments_list[0].text[:50]}...")
+                else:
+                    print("DEBUG: No segments detected!")
+                    
+                return result
             except Exception as e:
                 last_exception = e
                 print(f"Transcription failed with temperature {temp}, trying higher temperature.")

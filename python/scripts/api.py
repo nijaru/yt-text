@@ -76,6 +76,12 @@ def main():
 
         # Format the output to include only necessary fields
         if isinstance(output, dict):
+            # Get transcript text and check if it's empty
+            transcript_text = output.get("text")
+            if transcript_text is None or transcript_text.strip() == "":
+                print(f"DEBUG: Empty transcription detected for URL: {args.url}")
+                output["error"] = "No transcription text was generated"
+                
             formatted_result = {
                 "text": output.get("text"),
                 "model_name": output.get("model_name"),

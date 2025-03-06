@@ -236,6 +236,10 @@ func (s *service) doProcessVideo(ctx context.Context, video *models.Video, logge
 		logger.Error().Err(err).Msg("Transcription failed")
 		video.Status = models.StatusFailed
 		video.Error = err.Error()
+	} else if result.Text == "" {
+		logger.Error().Msg("Empty transcription returned")
+		video.Status = models.StatusFailed
+		video.Error = "No transcription text was generated"
 	} else {
 		logger.Info().Msg("Transcription completed successfully")
 		video.Status = models.StatusCompleted
