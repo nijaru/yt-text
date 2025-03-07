@@ -2,14 +2,10 @@
 
 ## Next Steps
 
-1. **Deploy on Fly.io**
-   - Create and configure fly.toml file
-   - Update Dockerfile for Fly.io deployment
-   - Set up persistent volume for SQLite database
-   - Configure memory and CPU constraints for efficient operation
-   - Implement health check endpoints
-   - Configure environment variables for production
-   - Set up CI/CD pipeline for automatic deployments
+1. ~~**CI/CD Integration**~~ ✅
+   - ~~Set up CI/CD pipeline for automatic deployments to Fly.io~~
+   - ~~Add automatic testing before deployment~~
+   - ~~Create deployment documentation~~
 
 2. **Enhance WebSocket Communication Layer**
    - Add more detailed progress updates (downloading, processing, etc.)

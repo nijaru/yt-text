@@ -63,10 +63,12 @@ The application uses gRPC for efficient communication between Go and Python:
 
 The web server provides a user-friendly interface for transcribing videos:
 
-1. Start the server using Docker (recommended):
+1. Start the development server using Docker (recommended):
 
    ```sh
-   docker-compose up --build
+   make docker-run
+   # or
+   docker-compose -f docker/local/docker-compose.yml up --build
    ```
 
 2. Access the web interface at http://localhost:8080
@@ -76,6 +78,39 @@ The web server provides a user-friendly interface for transcribing videos:
 4. Monitor real-time progress via WebSocket updates
 
 5. Multiple transcription jobs can be submitted simultaneously
+
+### Deployment
+
+#### Manual Deployment
+
+The application can be deployed to Fly.io:
+
+1. Install the Fly CLI tools
+
+2. Deploy using the provided configuration:
+
+   ```sh
+   make deploy
+   # or
+   fly deploy --config docker/fly/fly.toml
+   ```
+
+3. For more details on deployment configuration, see the files in `docker/fly/`
+
+#### CI/CD Pipeline
+
+This project uses GitHub Actions for automated testing and deployment:
+
+1. **Continuous Integration** - Runs tests, linting, and security scans on all commits and PRs
+   - Go and Python code linting and testing
+   - Security scanning for both languages
+   - Docker image building and vulnerability scanning
+
+2. **Continuous Deployment** - Automatically deploys to Fly.io when CI succeeds on the main branch
+   - Triggered after successful CI runs on the main branch
+   - Deploys the application using the Fly.io CLI
+
+For setup and configuration details, see [CI/CD Documentation](.github/workflows/README.md)
 
 ### Command Line
 
@@ -94,19 +129,43 @@ uv run scripts/ytext.py url1 url2 url3         # same as above
 
 ### Options
 
-- `--model`: Specify the Whisper model to use. (Default is `base.en`)
+- `--model`: Specify the Whisper model to use. (Default is `base.en` for production, `medium.en` for local development)
 
 ### Available Models
 
 The script supports various Whisper models:
 
-- `tiny`
-- `base`
-- `small`
-- `medium`
-- `large`
+- `tiny`: Very fast but less accurate
+- `base`: Good balance for very resource-constrained environments
+- `small`: Better accuracy with reasonable speed
+- `medium`: High quality results with moderate resource usage
+- `large-v3`: Best quality, highest resource usage
+- `large-v3-turbo`: High quality with faster processing
 
 Language-specific models are also available (e.g., `base.en` for English-optimized model).
+
+### Model Selection Guidelines
+
+- **Local Development**: The `medium.en` model is used by default, providing a good balance of accuracy and speed for development and testing.
+- **Production (Fly.io)**: The `base.en` model is used to optimize for resource efficiency and cost while maintaining acceptable accuracy.
+
+Whisper settings are configurable via environment variables - see Docker configuration files for details.
+
+## Docker Configuration
+
+The application uses Docker for both development and production environments:
+
+- **Development Environment** (`docker/local/`):
+  - Uses `medium.en` Whisper model for better accuracy during development
+  - Optimized for developer experience with debugging support
+  - Configured for local testing and development
+
+- **Production Environment** (`docker/fly/`):
+  - Uses `base.en` Whisper model optimized for resource efficiency
+  - Tuned for performance with memory constraints
+  - Configured for deployment to Fly.io
+
+See the README files in each Docker directory for detailed configuration information.
 
 ## Development Roadmap
 
