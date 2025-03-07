@@ -1,4 +1,4 @@
-.PHONY: all build test clean docker-build docker-run docker-prod docker-stop docker-prod-stop docker-logs docker-prod-logs python-deps
+.PHONY: all build test clean docker-build docker-run docker-prod docker-stop docker-prod-stop docker-logs docker-prod-logs python-deps grpc-server deploy
 
 # Variables
 BINARY_NAME=yt-text
@@ -40,29 +40,35 @@ python-deps-clean:
 
 # Docker commands
 docker-build:
-	docker build --no-cache -t $(DOCKER_IMAGE):$(DOCKER_TAG) .
+	docker build --no-cache -t $(DOCKER_IMAGE):$(DOCKER_TAG) -f docker/local/Dockerfile .
 
 docker-prod:
-	docker-compose -f docker-compose.prod.yml build
-	docker-compose -f docker-compose.prod.yml up
+	docker-compose -f docker/fly/docker-compose.yml build
+	docker-compose -f docker/fly/docker-compose.yml up
 
 docker-run:
-	docker-compose up
+	docker-compose -f docker/local/docker-compose.yml up
 
 docker-stop:
-	docker-compose down
+	docker-compose -f docker/local/docker-compose.yml down
 
 docker-prod-stop:
-	docker-compose -f docker-compose.prod.yml down
+	docker-compose -f docker/fly/docker-compose.yml down
 
 docker-logs:
-	docker-compose logs -f
+	docker-compose -f docker/local/docker-compose.yml logs -f
 
 docker-prod-logs:
-	docker-compose -f docker-compose.prod.yml logs -f
+	docker-compose -f docker/fly/docker-compose.yml logs -f
 
 version:
 	@echo $(DOCKER_IMAGE):$(DOCKER_TAG)
+
+grpc-server:
+	cd python && uv run scripts/grpc/start_server.py --port 50051
+
+deploy:
+	fly deploy --config docker/fly/fly.toml
 
 help:
 	@echo "Available targets:"
@@ -72,6 +78,7 @@ help:
 	@echo "  python-deps        - Install Python dependencies"
 	@echo "  python-deps-update - Update Python dependencies"
 	@echo "  python-deps-clean  - Clean Python dependencies"
+	@echo "  grpc-server        - Start the gRPC server for transcription"
 	@echo "  docker-build       - Build Docker image"
 	@echo "  docker-run         - Run with Docker Compose (development)"
 	@echo "  docker-prod        - Build and run production Docker setup"
@@ -79,4 +86,5 @@ help:
 	@echo "  docker-prod-stop   - Stop production Docker containers"
 	@echo "  docker-logs        - View development Docker logs"
 	@echo "  docker-prod-logs   - View production Docker logs"
-	@echo "  version           - Show Docker image version"
+	@echo "  deploy             - Deploy to Fly.io"
+	@echo "  version            - Show Docker image version"

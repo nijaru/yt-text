@@ -24,6 +24,7 @@ import (
 	"github.com/gofiber/fiber/v2/middleware/recover"
 	"github.com/gofiber/fiber/v2/middleware/requestid"
 	"github.com/gofiber/fiber/v2/middleware/timeout"
+	"github.com/gofiber/contrib/websocket"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 )
@@ -55,16 +56,39 @@ func main() {
 		log.Fatal().Err(err).Msg("Failed to initialize repository")
 	}
 
-	// Initialize script runner
-	scriptRunner, err := scripts.NewScriptRunner(scripts.Config{
-		PythonPath:  cfg.Video.PythonPath,
-		ScriptsPath: cfg.Video.ScriptsPath,
-		Timeout:     cfg.Video.ProcessTimeout,
-		TempDir:     cfg.TempDir,
-	})
-	if err != nil {
-		log.Fatal().Err(err).Msg("Failed to initialize script runner")
+	// Initialize transcription client (either gRPC or script runner)
+	var transcriptionClient scripts.TranscriptionClient
+	var clientErr error
+	
+	if cfg.Video.UseGRPC {
+		// Use gRPC client
+		log.Info().Str("server", cfg.Video.GRPCServerAddress).Msg("Using gRPC for transcription services")
+		transcriptionClient, clientErr = scripts.NewTranscriptionClient(scripts.FactoryConfig{
+			UseGRPC: true,
+			GRPCConfig: scripts.GRPCConfig{
+				ServerAddress: cfg.Video.GRPCServerAddress,
+				Timeout:       cfg.Video.ProcessTimeout,
+			},
+		})
+	} else {
+		// Use script runner
+		log.Info().Msg("Using script runner for transcription services")
+		transcriptionClient, clientErr = scripts.NewTranscriptionClient(scripts.FactoryConfig{
+			UseGRPC: false,
+			ScriptRunnerConfig: scripts.Config{
+				PythonPath:  cfg.Video.PythonPath,
+				ScriptsPath: cfg.Video.ScriptsPath,
+				Timeout:     cfg.Video.ProcessTimeout,
+				TempDir:     cfg.TempDir,
+				YouTubeAPIKey: cfg.Video.YouTubeAPIKey,
+			},
+		})
 	}
+	
+	if clientErr != nil {
+		log.Fatal().Err(clientErr).Msg("Failed to initialize transcription client")
+	}
+	defer transcriptionClient.Close()
 
 	// Initialize validator
 	validator := validation.NewValidator(cfg)
@@ -72,12 +96,17 @@ func main() {
 	// Initialize video service
 	videoService := video.NewService(
 		repo,
-		scriptRunner,
+		transcriptionClient,
 		validator,
 		video.Config{
-			ProcessTimeout: cfg.Video.ProcessTimeout,
-			MaxDuration:    cfg.Video.MaxDuration,
-			DefaultModel:   cfg.Video.DefaultModel,
+			ProcessTimeout:       cfg.Video.ProcessTimeout,
+			MaxDuration:          cfg.Video.MaxDuration,
+			DefaultModel:         cfg.Video.DefaultModel,
+			YouTubeAPIKey:        cfg.Video.YouTubeAPIKey,
+			TranscriptionPath:    cfg.Video.TranscriptionPath,
+			StorageSizeThreshold: cfg.Video.StorageSizeThreshold,
+			CleanupAfterDays:     cfg.Video.CleanupAfterDays,
+			TempDir:              cfg.TempDir,
 		},
 	)
 
@@ -96,13 +125,21 @@ func main() {
 
 	// Setup middleware
 	setupMiddleware(app, cfg, appLogger)
+	
+	// Setup WebSocket
+	app.Use("/ws", func(c *fiber.Ctx) error {
+		// IsWebSocketUpgrade returns true if the client
+		// requested upgrade to the WebSocket protocol
+		if websocket.IsWebSocketUpgrade(c) {
+			c.Locals("allowed", true)
+			return c.Next()
+		}
+		return fiber.ErrUpgradeRequired
+	})
 
 	// Setup routes
 	videoHandler := handlers.NewVideoHandler(videoService)
-
-	// API routes
-	app.Post("/api/transcribe", videoHandler.Transcribe)
-	app.Get("/api/transcribe/:id", videoHandler.GetTranscription)
+	videoHandler.RegisterRoutes(app)
 
 	// Health check
 	app.Get("/health", handlers.HealthCheck)
@@ -111,6 +148,9 @@ func main() {
 	app.Static("/static", "/app/static")
 	app.Static("/", "/app/static")
 
+	// Start scheduled cleanup job for expired transcriptions
+	startCleanupJob(videoService, cfg.Video.CleanupAfterDays)
+	
 	// Graceful shutdown setup
 	shutdownChan := make(chan os.Signal, 1)
 	signal.Notify(shutdownChan, os.Interrupt, syscall.SIGTERM)
@@ -244,36 +284,44 @@ func startServer(app *fiber.App, cfg *config.Config) {
 	}
 }
 
-func initializeVideoService(cfg *config.Config) (video.Service, error) {
-	// Initialize repository
-	db, err := sqlite.NewDB(cfg.Database.Path)
-	if err != nil {
-		return nil, err
+// startCleanupJob starts a periodic cleanup job for expired transcriptions
+func startCleanupJob(videoService video.Service, cleanupDays int) {
+	// Use reasonable defaults if not configured
+	interval := 24 * time.Hour // Run once a day
+	if cleanupDays <= 0 {
+		cleanupDays = 90 // Default to 90 days if not specified
 	}
-
-	repo, err := sqlite.NewRepository(db)
-	if err != nil {
-		return nil, err
-	}
-
-	// Initialize script runner
-	scriptRunner, err := scripts.NewScriptRunner(scripts.Config{
-		PythonPath:  cfg.Video.PythonPath,
-		ScriptsPath: cfg.Video.ScriptsPath,
-		Timeout:     cfg.Video.ProcessTimeout,
-		TempDir:     cfg.TempDir,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	// Initialize validator
-	validator := validation.NewValidator(cfg)
-
-	// Create and return video service
-	return video.NewService(repo, scriptRunner, validator, video.Config{
-		ProcessTimeout: cfg.Video.ProcessTimeout,
-		MaxDuration:    cfg.Video.MaxDuration,
-		DefaultModel:   cfg.Video.DefaultModel,
-	}), nil
+	
+	go func() {
+		log.Info().Int("cleanup_days", cleanupDays).Msg("Starting transcription cleanup job")
+		
+		// Run immediately on startup
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		err := videoService.CleanupExpiredTranscriptions(ctx)
+		cancel()
+		
+		if err != nil {
+			log.Error().Err(err).Msg("Initial cleanup job failed")
+		}
+		
+		// Then run periodically
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		
+		for {
+			select {
+			case <-ticker.C:
+				log.Info().Msg("Running scheduled transcription cleanup")
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+				err := videoService.CleanupExpiredTranscriptions(ctx)
+				cancel()
+				
+				if err != nil {
+					log.Error().Err(err).Msg("Scheduled cleanup job failed")
+				} else {
+					log.Info().Msg("Scheduled cleanup completed successfully")
+				}
+			}
+		}
+	}()
 }

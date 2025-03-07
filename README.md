@@ -8,7 +8,12 @@ A standalone version for direct command-line usage is available at `python/scrip
 
 - Download audio from YouTube and other platforms supported by yt-dlp
 - Convert audio to text using Faster Whisper (optimized version of OpenAI Whisper)
-- Web server interface for easy URL submission
+- Fetch existing YouTube captions when available (with fallback to Whisper)
+- Web server interface with WebSocket support for real-time updates
+- gRPC communication between Go and Python services for improved performance
+- Hybrid storage approach for efficient transcription storage
+- Job queue with prioritization and cancellation support
+- Multiple concurrent transcription jobs with real-time progress updates
 - Support for various Whisper models
 - JSON output
 
@@ -29,13 +34,55 @@ A standalone version for direct command-line usage is available at `python/scrip
 
 ## Usage
 
+### Using the gRPC Server
+
+The application uses gRPC for efficient communication between Go and Python:
+
+1. Start the gRPC server:
+
+   ```sh
+   # Using the convenience script
+   ./python/start_grpc.sh 50051
+   
+   # Or using make
+   make grpc-server
+   ```
+
+2. Enable gRPC in the Go service:
+
+   ```sh
+   # Set environment variables
+   export USE_GRPC=true
+   export GRPC_SERVER_ADDRESS=localhost:50051
+   
+   # Or use Docker Compose which sets these by default
+   docker-compose up
+   ```
+
+### Web Server
+
+The web server provides a user-friendly interface for transcribing videos:
+
+1. Start the server using Docker (recommended):
+
+   ```sh
+   docker-compose up --build
+   ```
+
+2. Access the web interface at http://localhost:8080
+
+3. Enter a YouTube URL and submit the form to begin transcription
+
+4. Monitor real-time progress via WebSocket updates
+
+5. Multiple transcription jobs can be submitted simultaneously
+
 ### Command Line
 
-The script `ytext.py` provides a simple interface for downloading audio and transcribing it to text. You can provide the URL either as a positional argument or with the `--url` flag:
+The script `ytext.py` provides a simple interface for downloading audio and transcribing it to text:
 
 ```sh
-uv run scripts/ytext.py <youtube-url>
-uv run scripts/ytext.py --url <youtube-url>    # same as above
+cd python && uv run scripts/ytext.py <youtube-url>
 ```
 
 Multiple URLs can be provided either as comma-separated values or as separate arguments:
@@ -43,12 +90,6 @@ Multiple URLs can be provided either as comma-separated values or as separate ar
 ```sh
 uv run scripts/ytext.py url1,url2,url3
 uv run scripts/ytext.py url1 url2 url3         # same as above
-```
-
-You can also run it directly with Python after installing dependencies and ensuring you are using a supported version of Python:
-
-```sh
-python3 scripts/ytext.py <youtube-url>
 ```
 
 ### Options
@@ -67,17 +108,9 @@ The script supports various Whisper models:
 
 Language-specific models are also available (e.g., `base.en` for English-optimized model).
 
-## Web Server
+## Development Roadmap
 
-### Docker (Recommended)
-
-In order to run the web server using Docker, you need to have Docker installed on your system. There is a Dockerfile and docker-compose.yml file included in the repository. The server can be run manually, but this is not actively tested.
-
-1. Build and run the Docker container:
-
-   ```sh
-   docker-compose up --build
-   ```
+See [todo.md](todo.md) for current development priorities and future enhancements.
 
 ## License
 

@@ -1,8 +1,8 @@
 services:
   app:
     build:
-      context: .
-      dockerfile: Dockerfile.prod
+      context: ../..
+      dockerfile: docker/fly/Dockerfile
       args:
         GOMEMLIMIT: 1024MiB
         GOGC: 10
@@ -12,7 +12,7 @@ services:
       # Server Configuration
       - ENV=production
       - DEBUG=false
-      - DB_PATH=/tmp/urls.db
+      - DB_PATH=/data/urls.db
       - SERVER_PORT=8080
       - READ_TIMEOUT=30s
       - WRITE_TIMEOUT=60s
@@ -22,8 +22,7 @@ services:
       - RATE_LIMIT_INTERVAL=10s
 
       # Model Configuration
-      - MODEL_NAME=tiny.en
-      - SUMMARY_MODEL_NAME=facebook/bart-base
+      - WHISPER_MODEL=base.en
 
       # Python Environment
       - PYTHONDONTWRITEBYTECODE=1
@@ -51,6 +50,8 @@ services:
       - MIDDLEWARE_ENABLE_COMPRESS=true
       - MIDDLEWARE_ENABLE_ETAG=true
       - MIDDLEWARE_ENABLE_DEBUG_MODE=false
+      - USE_GRPC=true
+      - GRPC_SERVER_ADDRESS=localhost:50051
 
     restart: unless-stopped
     security_opt:
@@ -58,6 +59,8 @@ services:
     read_only: true
     tmpfs:
       - /tmp:size=1G,noexec
+    volumes:
+      - yt_text_data:/data
     deploy:
       resources:
         limits:
@@ -89,3 +92,6 @@ services:
 networks:
   yt_text_net:
     driver: bridge
+
+volumes:
+  yt_text_data:

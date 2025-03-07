@@ -1,7 +1,8 @@
 services:
   app:
     build:
-      context: .
+      context: ../..
+      dockerfile: docker/local/Dockerfile
     image: yt-text:latest
     environment:
       - ENV=development
@@ -30,6 +31,8 @@ services:
       - MIDDLEWARE_ENABLE_COMPRESS=false
       - MIDDLEWARE_ENABLE_ETAG=false
       - MIDDLEWARE_ENABLE_DEBUG_MODE=true
+      - USE_GRPC=true
+      - GRPC_SERVER_ADDRESS=grpc:50051
     ports:
       - "8080:8080"
     tmpfs:
@@ -39,6 +42,32 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    depends_on:
+      grpc:
+        condition: service_healthy
+
+  grpc:
+    build:
+      context: ../..
+      dockerfile: docker/local/Dockerfile
+    image: yt-text:latest
+    command: make grpc-server
+    environment:
+      - PYTHONDONTWRITEBYTECODE=1
+      - PYTHONUNBUFFERED=1
+      - WHISPER_MODEL=base.en
+    expose:
+      - "50051"
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "50051"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     logging:
       driver: "json-file"
       options:

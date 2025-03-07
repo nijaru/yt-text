@@ -64,14 +64,22 @@ type DatabaseConfig struct {
 }
 
 type VideoConfig struct {
-	ProcessTimeout      time.Duration `json:"process_timeout"`
-	MaxDuration         time.Duration `json:"max_duration"`
-	// MaxFileSize       int64         `json:"max_file_size"`
-	DefaultModel        string   `json:"default_model"`
-	PythonPath          string   `json:"python_path"`
-	ScriptsPath         string   `json:"scripts_path"`
-	Environment         []string `json:"environment"`
-	AllowNonYouTubeURLs bool     `json:"allow_non_youtube_urls"`
+	ProcessTimeout       time.Duration `json:"process_timeout"`
+	MaxDuration          time.Duration `json:"max_duration"`
+	// MaxFileSize        int64         `json:"max_file_size"`
+	DefaultModel         string   `json:"default_model"`
+	PythonPath           string   `json:"python_path"`
+	ScriptsPath          string   `json:"scripts_path"`
+	Environment          []string `json:"environment"`
+	AllowNonYouTubeURLs  bool     `json:"allow_non_youtube_urls"`
+	YouTubeAPIKey        string   `json:"youtube_api_key"`
+	TranscriptionPath    string   `json:"transcription_path"`
+	StorageSizeThreshold int64    `json:"storage_size_threshold"`
+	CleanupAfterDays     int      `json:"cleanup_after_days"`
+	
+	// gRPC configuration
+	UseGRPC           bool     `json:"use_grpc"`
+	GRPCServerAddress string   `json:"grpc_server_address"`
 }
 
 type CORSConfig struct {
@@ -169,13 +177,21 @@ func Load() (*Config, error) {
 
 		// Video Service
 		Video: VideoConfig{
-			ProcessTimeout:      getEnvAsDuration("VIDEO_PROCESS_TIMEOUT", 30*time.Minute),
-			MaxDuration:         getEnvAsDuration("VIDEO_MAX_DURATION", 4*time.Hour),
-			// MaxFileSize:      getEnvAsInt64("VIDEO_MAX_FILE_SIZE", 100*1024*1024), // 100MB
-			DefaultModel:        getEnv("WHISPER_MODEL", "large-v3-turbo"),
-			PythonPath:          getEnv("PYTHON_PATH", "python3"),
-			ScriptsPath:         getEnv("SCRIPTS_PATH", "./scripts"),
-			AllowNonYouTubeURLs: getEnvAsBool("ALLOW_NON_YOUTUBE_URLS", false),
+			ProcessTimeout:       getEnvAsDuration("VIDEO_PROCESS_TIMEOUT", 30*time.Minute),
+			MaxDuration:          getEnvAsDuration("VIDEO_MAX_DURATION", 4*time.Hour),
+			// MaxFileSize:       getEnvAsInt64("VIDEO_MAX_FILE_SIZE", 100*1024*1024), // 100MB
+			DefaultModel:         getEnv("WHISPER_MODEL", "large-v3-turbo"),
+			PythonPath:           getEnv("PYTHON_PATH", "python3"),
+			ScriptsPath:          getEnv("SCRIPTS_PATH", "./scripts"),
+			AllowNonYouTubeURLs:  getEnvAsBool("ALLOW_NON_YOUTUBE_URLS", false),
+			YouTubeAPIKey:        getEnv("YOUTUBE_API_KEY", ""),
+			TranscriptionPath:    getEnv("TRANSCRIPTION_PATH", filepath.Join("/var/lib/yt-text", "transcriptions")),
+			StorageSizeThreshold: getEnvAsInt64("STORAGE_SIZE_THRESHOLD", 100*1024), // 100KB
+			CleanupAfterDays:     getEnvAsInt("CLEANUP_AFTER_DAYS", 90),             // 90 days
+			
+			// gRPC configuration
+			UseGRPC:              getEnvAsBool("USE_GRPC", false),
+			GRPCServerAddress:    getEnv("GRPC_SERVER_ADDRESS", "localhost:50051"),
 		},
 
 		// Middleware

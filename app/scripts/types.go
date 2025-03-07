@@ -12,6 +12,7 @@ type Config struct {
 	TempDir     string        // Temporary directory for downloads
 	Environment []string      // Additional environment variables
 	Model       string        // Default Whisper model to use
+	YouTubeAPIKey string      // YouTube Data API v3 key for caption fetching
 }
 
 // GetDefaultModel returns the default model from the configuration or a fallback value.
@@ -42,4 +43,13 @@ type TranscriptionResult struct {
 	URL                 *string `json:"url,omitempty"`             // Original URL that was transcribed
 	Language            *string `json:"language,omitempty"`        // Detected language code
 	LanguageProbability float64 `json:"language_probability,omitempty"` // Confidence of language detection
+	Source              string  `json:"source,omitempty"`          // Source of transcription (whisper or youtube_api)
+}
+
+// YouTubeCaptionResult represents the captions fetched from YouTube API
+type YouTubeCaptionResult struct {
+	Transcription string  `json:"transcription"`    // The caption text
+	Title         string  `json:"title,omitempty"`  // Title of the video
+	Language      string  `json:"language,omitempty"` // Language of the captions
+	Error         string  `json:"error,omitempty"`  // Error message if fetching failed
 }

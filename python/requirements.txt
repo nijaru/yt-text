@@ -5,3 +5,7 @@ psutil>=5.9.0
 numpy>=1.22.0
 librosa>=0.10.0
 soundfile>=0.12.1
+beautifulsoup4>=4.12.2
+requests>=2.31.0
+lxml>=4.9.3
+python-dotenv>=1.0.0

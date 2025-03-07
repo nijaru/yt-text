@@ -1,0 +1,64 @@
+app = "yt-text"
+primary_region = "sjc"
+
+[build]
+  dockerfile = "docker/fly/Dockerfile"
+
+[env]
+  ENV = "production"
+  SERVER_PORT = "8080"
+  READ_TIMEOUT = "30s"
+  WRITE_TIMEOUT = "60s"
+  IDLE_TIMEOUT = "120s"
+  DEBUG = "false"
+  DB_PATH = "/data/urls.db"
+  LOG_DIR = "/data/logs"
+  VIDEO_MAX_DURATION = "4h"
+  WHISPER_MODEL = "base.en"
+  PYTHONDONTWRITEBYTECODE = "1"
+  PYTHONUNBUFFERED = "1"
+  WHISPER_DOWNLOAD_ROOT = "/tmp"
+  PYTHONPATH = "/app"
+  PYTORCH_CUDA_ALLOC_CONF = "max_split_size_mb:32"
+  MALLOC_ARENA_MAX = "1"
+  MALLOC_TRIM_THRESHOLD_ = "100000"
+  MALLOC_MMAP_THRESHOLD_ = "100000"
+  PYTHONMALLOC = "malloc"
+  GOMAXPROCS = "1"
+  GOGC = "10"
+  OOM_SCORE_ADJ = "500"
+  MIDDLEWARE_ENABLE_RECOVER = "true"
+  MIDDLEWARE_ENABLE_REQUEST_ID = "true"
+  MIDDLEWARE_ENABLE_LOGGER = "true"
+  MIDDLEWARE_ENABLE_TIMEOUT = "true"
+  MIDDLEWARE_ENABLE_CORS = "true"
+  MIDDLEWARE_ENABLE_RATE_LIMIT = "true"
+  MIDDLEWARE_ENABLE_COMPRESS = "true"
+  MIDDLEWARE_ENABLE_ETAG = "true"
+  MIDDLEWARE_ENABLE_DEBUG_MODE = "false"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = true
+  auto_start_machines = true
+  min_machines_running = 1
+  max_machines_running = 3
+  processes = ["app"]
+  
+[http_service.concurrency]
+  type = "connections"
+  hard_limit = 500
+  soft_limit = 400
+
+[[http_service.checks]]
+  interval = "30s"
+  timeout = "10s"
+  grace_period = "40s"
+  method = "GET"
+  path = "/health"
+  protocol = "http"
+
+[mounts]
+  source = "yt_text_data"
+  destination = "/data"

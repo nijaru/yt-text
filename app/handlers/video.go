@@ -1,11 +1,19 @@
 package handlers
 
 import (
-	"yt-text/errors"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"time"
+	ytError "yt-text/errors"
+	"yt-text/logger"
 	"yt-text/models"
 	"yt-text/services/video"
 
+	"github.com/gofiber/contrib/websocket"
 	"github.com/gofiber/fiber/v2"
+	"github.com/google/uuid"
 )
 
 type VideoHandler struct {
@@ -13,30 +21,68 @@ type VideoHandler struct {
 }
 
 func NewVideoHandler(service video.Service) *VideoHandler {
-	return &VideoHandler{service: service}
+	return &VideoHandler{
+		service: service,
+	}
 }
 
-func (h *VideoHandler) Transcribe(c *fiber.Ctx) error {
-	url := c.FormValue("url")
+// RegisterRoutes registers the routes for the video handlers
+func (h *VideoHandler) RegisterRoutes(app *fiber.App) {
+	api := app.Group("/api")
+	
+	// REST endpoints
+	api.Post("/transcribe", h.TranscribeVideo)
+	api.Get("/transcribe/:id", h.GetTranscription)
+	api.Delete("/transcribe/:id", h.CancelTranscription) // New endpoint for job cancellation
+	
+	// WebSocket endpoint
+	app.Use("/ws/transcribe", websocket.New(h.TranscribeWebSocket))
+}
+
+// TranscribeVideo handles video transcription requests
+func (h *VideoHandler) TranscribeVideo(c *fiber.Ctx) error {
+	// Support both form and JSON input
+	var url string
+	
+	// Check if content type is JSON
+	if c.Get("Content-Type") == "application/json" {
+		var req struct {
+			URL string `json:"url"`
+		}
+		
+		if err := c.BodyParser(&req); err != nil {
+			return &errors.AppError{
+				Code:    fiber.StatusBadRequest,
+				Message: "Invalid request body",
+			}
+		}
+		url = req.URL
+	} else {
+		// Fallback to form value
+		url = c.FormValue("url")
+	}
+	
 	if url == "" {
 		return &errors.AppError{
 			Code:    fiber.StatusBadRequest,
 			Message: "URL is required",
 		}
 	}
-
+	
+	// Start transcription process
 	video, err := h.service.Transcribe(c.Context(), url)
 	if err != nil {
 		return err
 	}
-
-	// Use NewVideoResponse for consistency
+	
+	// Return response with video ID
 	return c.JSON(fiber.Map{
 		"success": true,
 		"data":    models.NewVideoResponse(video),
 	})
 }
 
+// GetTranscription retrieves a transcription by ID
 func (h *VideoHandler) GetTranscription(c *fiber.Ctx) error {
 	id := c.Params("id")
 	if id == "" {
@@ -45,14 +91,421 @@ func (h *VideoHandler) GetTranscription(c *fiber.Ctx) error {
 			Message: "ID is required",
 		}
 	}
-
+	
+	// Get the video record
 	video, err := h.service.GetTranscription(c.Context(), id)
 	if err != nil {
 		return err
 	}
-
+	
+	// If the video has file-based storage, fetch the text
+	if video.TranscriptionPath != "" && video.Transcription == "" {
+		text, err := h.service.GetTranscriptionText(c.Context(), video)
+		if err != nil {
+			return err
+		}
+		
+		// Temporarily set transcription for response
+		// This doesn't modify the database record
+		video.Transcription = text
+	}
+	
 	return c.JSON(fiber.Map{
 		"success": true,
 		"data":    models.NewVideoResponse(video),
 	})
+}
+
+// WebSocket message types
+type webSocketMessage struct {
+	Type    string          `json:"type"`
+	Payload json.RawMessage `json:"payload"`
+}
+
+type transcribeRequest struct {
+	URL string `json:"url"`
+}
+
+type cancelRequest struct {
+	ID string `json:"id"`
+}
+
+type progressUpdate struct {
+	ID       string  `json:"id"`
+	Status   string  `json:"status"`
+	Progress float64 `json:"progress,omitempty"`
+	Message  string  `json:"message,omitempty"`
+	Stage    string  `json:"stage,omitempty"`      // download, process, complete
+}
+
+// TranscribeWebSocket handles WebSocket connections for real-time transcription updates
+func (h *VideoHandler) TranscribeWebSocket(c *websocket.Conn) {
+	// Create a unique connection ID
+	connID := uuid.New().String()
+	logger.Info("WebSocket connection established", "conn_id", connID)
+	
+	// Set up context with timeout for the entire WebSocket session
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Minute)
+	defer cancel()
+	
+	// Subscribe to transcription updates channel
+	updateChannel := make(chan *progressUpdate, 10)
+	errorChannel := make(chan error, 1)
+	
+	// Handle client messages
+	go func() {
+		for {
+			messageType, msg, err := c.ReadMessage()
+			if err != nil {
+				logger.Error("WebSocket read error", "error", err, "conn_id", connID)
+				errorChannel <- err
+				return
+			}
+			
+			// Only process text messages
+			if messageType != websocket.TextMessage {
+				continue
+			}
+			
+			// Parse message
+			var wsMsg webSocketMessage
+			if err := json.Unmarshal(msg, &wsMsg); err != nil {
+				logger.Error("WebSocket message parse error", "error", err, "conn_id", connID)
+				sendErrorMessage(c, "Invalid message format")
+				continue
+			}
+			
+			// Handle message by type
+			switch wsMsg.Type {
+			case "transcribe":
+				// Handle transcription request
+				var req transcribeRequest
+				if err := json.Unmarshal(wsMsg.Payload, &req); err != nil {
+					sendErrorMessage(c, "Invalid transcribe request")
+					continue
+				}
+				
+				// Start transcription
+				go startTranscription(ctx, h.service, req.URL, updateChannel, errorChannel)
+				
+			case "cancel":
+				// Handle cancellation request
+				var req cancelRequest
+				if err := json.Unmarshal(wsMsg.Payload, &req); err != nil {
+					sendErrorMessage(c, "Invalid cancel request")
+					continue
+				}
+				
+				// Validate job ID
+				if req.ID == "" {
+					sendErrorMessage(c, "Job ID is required")
+					continue
+				}
+				
+				// Process cancellation in a goroutine
+				go func() {
+					// First check if job exists and is in processing state
+					video, err := h.service.GetTranscription(ctx, req.ID)
+					if err != nil {
+						errorChannel <- fmt.Errorf("job not found: %w", err)
+						return
+					}
+					
+					// Check if job is in processing state
+					if video.Status != models.StatusProcessing {
+						errorChannel <- errors.New("only in-progress jobs can be canceled")
+						return
+					}
+					
+					// Attempt to cancel the job
+					success := h.service.CancelJob(req.ID)
+					
+					if success {
+						// Update the video status in the database
+						video.Status = models.StatusFailed
+						video.Error = "Canceled by user"
+						video.UpdatedAt = time.Now()
+						
+						// Save the canceled status
+						saveCtx, saveCancel := context.WithTimeout(context.Background(), 5*time.Second)
+						defer saveCancel()
+						
+						if saveErr := h.service.GetRepository().Save(saveCtx, video); saveErr != nil {
+							logger.Error("Failed to save canceled status", "error", saveErr, "job_id", req.ID)
+						}
+						
+						// Send cancellation success update
+						updateChannel <- &progressUpdate{
+							ID:       req.ID,
+							Status:   string(models.StatusFailed),
+							Progress: 1.0,
+							Message:  "Job canceled by user",
+							Stage:    "complete",
+						}
+					} else {
+						// Cancellation failed
+						errorChannel <- errors.New("unable to cancel job - job may be already completed")
+					}
+				}()
+			
+			case "ping":
+				// Handle ping messages
+				sendMessage(c, "pong", nil)
+				
+			default:
+				sendErrorMessage(c, "Unknown message type")
+			}
+		}
+	}()
+	
+	// Send updates to client
+	for {
+		select {
+		case update := <-updateChannel:
+			// Send progress update
+			if err := sendMessage(c, "progress", update); err != nil {
+				logger.Error("Failed to send progress update", "error", err, "conn_id", connID)
+				return
+			}
+			
+		case err := <-errorChannel:
+			// Send error and close connection
+			sendErrorMessage(c, "Transcription error: "+err.Error())
+			return
+			
+		case <-ctx.Done():
+			// Context timeout or cancellation
+			sendErrorMessage(c, "Connection timeout")
+			return
+		}
+	}
+}
+
+// startTranscription begins a transcription job and sends updates
+func startTranscription(
+	ctx context.Context, 
+	service video.Service, 
+	url string, 
+	updates chan<- *progressUpdate,
+	errors chan<- error,
+) {
+	// Start transcription
+	video, err := service.Transcribe(ctx, url)
+	if err != nil {
+		errors <- err
+		return
+	}
+	
+	// Send initial update
+	updates <- &progressUpdate{
+		ID:       video.ID,
+		Status:   string(video.Status),
+		Progress: 0.0,
+		Message:  "Transcription started",
+		Stage:    "download",
+	}
+	
+	// Poll for updates until complete
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	
+	for {
+		select {
+		case <-ticker.C:
+			// Check status
+			current, err := service.GetTranscription(ctx, video.ID)
+			if err != nil {
+				errors <- err
+				return
+			}
+			
+			// Calculate progress and detailed message
+			var progress float64 = 0
+			var message string
+			var stage string
+			
+			switch current.Status {
+			case models.StatusProcessing:
+				// Check how far along we are in the process
+				elapsed := time.Since(current.CreatedAt)
+				totalEstimatedDuration := 10 * time.Minute // Assuming ~10 min max
+				
+				if elapsed < 30*time.Second {
+					// Initial downloading phase
+					progress = float64(elapsed) / float64(30*time.Second)
+					if progress > 0.95 {
+						progress = 0.95
+					}
+					stage = "download"
+					message = "Downloading video"
+				} else if elapsed < 2*time.Minute {
+					// Early processing phase
+					progress = 0.15 + (float64(elapsed-30*time.Second) / 
+								  float64(90*time.Second) * 0.25)
+					stage = "process"
+					message = "Analyzing audio"
+				} else {
+					// Main processing phase
+					baseProgress := 0.4
+					remainingProgress := 0.55 // Leave room for final 5%
+					elapsedSinceProcessingBegan := elapsed - 2*time.Minute
+					remainingEstimatedTime := totalEstimatedDuration - 2*time.Minute
+					
+					additionalProgress := float64(elapsedSinceProcessingBegan) / 
+									 float64(remainingEstimatedTime) * remainingProgress
+					
+					progress = baseProgress + additionalProgress
+					if progress > 0.95 {
+						progress = 0.95 // Cap at 95% until complete
+					}
+					
+					stage = "process"
+					message = "Generating transcription"
+				}
+				
+			case models.StatusCompleted:
+				progress = 1.0
+				stage = "complete"
+				message = "Transcription complete"
+				
+				// Get the source for a more descriptive message
+				if current.Source == "youtube_api" {
+					message = "Retrieved official captions"
+				} else {
+					message = "Generated transcription complete"
+				}
+				
+				// Send final update
+				updates <- &progressUpdate{
+					ID:       current.ID,
+					Status:   string(current.Status),
+					Progress: progress,
+					Message:  message,
+					Stage:    stage,
+				}
+				return
+				
+			case models.StatusFailed:
+				progress = 1.0
+				stage = "complete" // We're done, even though it failed
+				message = "Transcription failed: " + current.Error
+				
+				// Send final update
+				updates <- &progressUpdate{
+					ID:       current.ID,
+					Status:   string(current.Status),
+					Progress: progress,
+					Message:  message,
+					Stage:    stage,
+				}
+				return
+			}
+			
+			// Send update
+			updates <- &progressUpdate{
+				ID:       current.ID,
+				Status:   string(current.Status),
+				Progress: progress,
+				Message:  message,
+				Stage:    stage,
+			}
+			
+		case <-ctx.Done():
+			// Context canceled
+			errors <- ctx.Err()
+			return
+		}
+	}
+}
+
+// sendMessage sends a typed message through the WebSocket
+func sendMessage(c *websocket.Conn, msgType string, payload interface{}) error {
+	var payloadBytes []byte
+	var err error
+	
+	if payload != nil {
+		payloadBytes, err = json.Marshal(payload)
+		if err != nil {
+			return err
+		}
+	} else {
+		payloadBytes = []byte("{}")
+	}
+	
+	msg := webSocketMessage{
+		Type:    msgType,
+		Payload: payloadBytes,
+	}
+	
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return err
+	}
+	
+	return c.WriteMessage(websocket.TextMessage, data)
+}
+
+// sendErrorMessage sends an error message to the client
+func sendErrorMessage(c *websocket.Conn, errorMsg string) {
+	type errorPayload struct {
+		Error string `json:"error"`
+	}
+	
+	sendMessage(c, "error", errorPayload{Error: errorMsg})
+}
+
+// CancelTranscription cancels an in-progress transcription job
+func (h *VideoHandler) CancelTranscription(c *fiber.Ctx) error {
+	id := c.Params("id")
+	if id == "" {
+		return &ytError.AppError{
+			Code:    fiber.StatusBadRequest,
+			Message: "ID is required",
+		}
+	}
+	
+	// First, check if the video exists in the database
+	video, err := h.service.GetTranscription(c.Context(), id)
+	if err != nil {
+		return err // This will handle not found errors
+	}
+	
+	// Only allow cancellation for videos that are in processing state
+	if video.Status != models.StatusProcessing {
+		return c.JSON(fiber.Map{
+			"success": false,
+			"message": "Only in-progress transcriptions can be canceled",
+		})
+	}
+	
+	// Attempt to cancel the job
+	success := h.service.CancelJob(id)
+	
+	if success {
+		// Update the video status in the database to canceled
+		video.Status = models.StatusFailed
+		video.Error = "Canceled by user"
+		video.UpdatedAt = time.Now()
+		
+		// Try to save the canceled status
+		saveCtx, saveCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer saveCancel()
+		
+		// The error is logged but we still return success to the user
+		// since the job was successfully canceled
+		if saveErr := h.service.GetRepository().Save(saveCtx, video); saveErr != nil {
+			logger.Error("Failed to save canceled status", "error", saveErr, "video_id", id)
+		}
+		
+		return c.JSON(fiber.Map{
+			"success": true,
+			"message": "Transcription job canceled",
+		})
+	} else {
+		// Job couldn't be canceled
+		return c.JSON(fiber.Map{
+			"success": false,
+			"message": "Unable to cancel job - job may be already completed",
+		})
+	}
 }

@@ -1,0 +1,61 @@
+syntax = "proto3";
+
+package transcribe;
+
+option go_package = "yt-text/protos/transcribe";
+
+// TranscriptionService defines the gRPC service for video transcription
+service TranscriptionService {
+  // Validate checks if a video URL is valid and can be processed
+  rpc Validate(ValidateRequest) returns (VideoInfo) {}
+  
+  // Transcribe starts a video transcription and streams progress updates
+  rpc Transcribe(TranscribeRequest) returns (stream TranscribeResponse) {}
+  
+  // FetchYouTubeCaptions retrieves captions from YouTube API
+  rpc FetchYouTubeCaptions(CaptionRequest) returns (TranscribeResponse) {}
+}
+
+// ValidateRequest is used to validate a video URL
+message ValidateRequest {
+  string url = 1;
+}
+
+// VideoInfo describes basic information about a video
+message VideoInfo {
+  bool valid = 1;
+  double duration = 2;
+  string format = 3;
+  string error = 4;
+  string url = 5;
+}
+
+// TranscribeRequest contains parameters for transcription
+message TranscribeRequest {
+  string url = 1;
+  bool enable_constraints = 2;
+  map<string, string> options = 3;
+}
+
+// TranscribeResponse contains transcription results or progress updates
+message TranscribeResponse {
+  // Result fields
+  string text = 1;
+  string model_name = 2;
+  double duration = 3;
+  string error = 4;
+  string title = 5;
+  string language = 6;
+  double language_probability = 7;
+  string source = 8;
+  
+  // Progress update fields
+  double progress = 9;
+  string status_message = 10;
+}
+
+// CaptionRequest contains parameters for fetching YouTube captions
+message CaptionRequest {
+  string video_id = 1;
+  string api_key = 2;
+}

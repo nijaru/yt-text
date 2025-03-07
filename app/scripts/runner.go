@@ -133,3 +133,9 @@ func validateJSONOutput(output []byte) error {
 	}
 	return nil
 }
+
+// Close cleans up any resources
+func (r *ScriptRunner) Close() error {
+	// Currently, no resources need to be cleaned up
+	return nil
+}
