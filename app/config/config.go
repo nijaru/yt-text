@@ -151,13 +151,13 @@ func Load() (*Config, error) {
 		// CORS Configuration
 		CORS: CORSConfig{
 			Enabled:        getEnvAsBool("CORS_ENABLED", true),
-			AllowedOrigins: getEnvAsStringSlice("CORS_ALLOWED_ORIGINS", []string{"*"}),
+			AllowedOrigins: getEnvAsStringSlice("CORS_ALLOWED_ORIGINS", getDefaultCORSOrigins(getEnv("ENV", "development"))),
 			AllowedMethods: getEnvAsStringSlice(
 				"CORS_ALLOWED_METHODS",
 				[]string{"GET", "POST", "OPTIONS"},
 			),
-			AllowedHeaders:   getEnvAsStringSlice("CORS_ALLOWED_HEADERS", []string{"Content-Type"}),
-			ExposedHeaders:   getEnvAsStringSlice("CORS_EXPOSED_HEADERS", []string{}),
+			AllowedHeaders:   getEnvAsStringSlice("CORS_ALLOWED_HEADERS", []string{"Content-Type", "Authorization", "X-Request-ID"}),
+			ExposedHeaders:   getEnvAsStringSlice("CORS_EXPOSED_HEADERS", []string{"X-Request-ID"}),
 			AllowCredentials: getEnvAsBool("CORS_ALLOW_CREDENTIALS", false),
 			MaxAge:           getEnvAsInt("CORS_MAX_AGE", 86400),
 		},
@@ -312,6 +312,19 @@ func getEnv(key, defaultValue string) string {
 		return value
 	}
 	return defaultValue
+}
+
+// getDefaultCORSOrigins returns environment-appropriate CORS origins
+func getDefaultCORSOrigins(env string) []string {
+	if env == "production" {
+		// In production, specify exact origins instead of wildcard
+		return []string{
+			"https://yt-text.fly.dev",
+			"https://yourtranscription.com", // Replace with actual production domains
+		}
+	}
+	// For development, allow all origins
+	return []string{"*"}
 }
 
 func getEnvAsInt(key string, defaultValue int) int {

@@ -246,6 +246,25 @@ func setupMiddleware(app *fiber.App, cfg *config.Config, logger *logger.Logger) 
 		app.Use(etag.New())
 	}
 
+	// Add security headers to all responses
+	app.Use(func(c *fiber.Ctx) error {
+		// Prevent browsers from incorrectly detecting non-scripts as scripts
+		c.Set("X-Content-Type-Options", "nosniff")
+		// Prevent clickjacking attacks
+		c.Set("X-Frame-Options", "DENY")
+		// Enable the XSS filter built into most recent web browsers
+		c.Set("X-XSS-Protection", "1; mode=block")
+		// Control how much information the browser includes with navigations away from the page
+		c.Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		// Prevents browser from caching sensitive data
+		c.Set("Cache-Control", "no-store, max-age=0")
+		// Enable HTTP Strict Transport Security
+		if !cfg.Debug {
+			c.Set("Strict-Transport-Security", "max-age=63072000; includeSubDomains; preload")
+		}
+		return c.Next()
+	})
+
 	if cfg.Middleware.EnableDebugMode && cfg.Debug {
 		app.Use(func(c *fiber.Ctx) error {
 			c.Set("X-Debug-Mode", "true")

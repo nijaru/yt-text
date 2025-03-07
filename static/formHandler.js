@@ -6,6 +6,11 @@ const activeConnections = new Map();
 // Map to track active jobs and their elements
 const activeJobs = new Map();
 
+// WebSocket reconnection settings
+const WS_RECONNECT_MAX_ATTEMPTS = 5;
+const WS_RECONNECT_BASE_DELAY = 1000; // 1 second
+const WS_RECONNECT_MAX_DELAY = 30000; // 30 seconds
+
 document
     .getElementById("transcriptionForm")
     .addEventListener("submit", async (event) => {
@@ -41,67 +46,211 @@ document
     });
 
 /**
- * Process transcription using WebSockets for real-time updates
+ * Creates a WebSocket connection with reconnection capabilities
+ * @param {string} url - The URL to transcribe
+ * @param {HTMLElement} jobElement - The job element to update
+ * @param {number} [attempt=0] - Current reconnection attempt
+ * @param {boolean} [isReconnect=false] - Whether this is a reconnection
+ * @param {string} [jobId=null] - The job ID if already known
  */
-async function processWithWebSocket(url) {
-    try {
-        // Create WebSocket connection
-        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsUrl = `${wsProtocol}//${window.location.host}/ws/transcribe`;
-        const socket = new WebSocket(wsUrl);
+function createWebSocketConnection(url, jobElement, attempt = 0, isReconnect = false, jobId = null) {
+    // Generate WebSocket URL
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${wsProtocol}//${window.location.host}/ws/transcribe`;
+    
+    // Create WebSocket instance
+    const socket = new WebSocket(wsUrl);
+    
+    // Connection backoff calculation for reconnections
+    const reconnectDelay = Math.min(
+        WS_RECONNECT_BASE_DELAY * Math.pow(2, attempt),
+        WS_RECONNECT_MAX_DELAY
+    );
+    
+    // Clear any existing intervals
+    if (socket.pingInterval) {
+        clearInterval(socket.pingInterval);
+    }
+    
+    // Track connection state
+    socket.isReconnecting = isReconnect;
+    socket.reconnectAttempt = attempt;
+    socket.jobId = jobId;
+    socket.jobElement = jobElement;
+    socket.originalUrl = url;
+    
+    // Set up event handlers
+    socket.onopen = function() {
+        // Reset reconnection tracking on successful connection
+        if (isReconnect) {
+            const statusEl = jobElement.querySelector(".job-message");
+            if (statusEl) {
+                statusEl.textContent = "Reconnected. Resuming...";
+            }
+        }
         
-        // Create job entry with pending status (we don't have ID yet)
-        const jobElement = createJobElement(url);
-        
-        // Set up event handlers
-        socket.onopen = function() {
-            // Send transcription request when connected
+        if (jobId) {
+            // For reconnections, we want to query the status
+            requestJobStatus(socket, jobId);
+        } else {
+            // For new connections, send the transcription request
             const message = {
                 type: "transcribe",
                 payload: { url: url }
             };
             socket.send(JSON.stringify(message));
-        };
+        }
         
-        socket.onmessage = function(event) {
-            const message = JSON.parse(event.data);
-            
-            switch (message.type) {
-                case "progress":
-                    handleProgressUpdate(message.payload, socket, jobElement);
-                    break;
-                    
-                case "error":
-                    removeJobElement(jobElement);
-                    displayError(document.getElementById("response"), message.payload.error);
-                    closeConnection(socket);
-                    break;
-                    
-                case "pong":
-                    // Keep-alive response, no action needed
-                    break;
-            }
-        };
-        
-        socket.onerror = function(error) {
-            removeJobElement(jobElement);
-            displayError(document.getElementById("response"), "WebSocket error: " + error.message);
-            closeConnection(socket);
-        };
-        
-        socket.onclose = function() {
-            // Handle normal closure
-            // No need to do anything here as job elements are removed on completion
-        };
-        
-        // Set up ping interval to keep connection alive
-        const pingInterval = setInterval(() => {
+        // Set up ping interval for this connection
+        socket.pingInterval = setInterval(() => {
             if (socket && socket.readyState === WebSocket.OPEN) {
                 socket.send(JSON.stringify({ type: "ping" }));
             } else {
-                clearInterval(pingInterval);
+                clearInterval(socket.pingInterval);
             }
         }, 30000); // Send ping every 30 seconds
+    };
+    
+    socket.onmessage = function(event) {
+        const message = JSON.parse(event.data);
+        
+        switch (message.type) {
+            case "progress":
+                handleProgressUpdate(message.payload, socket, jobElement);
+                break;
+                
+            case "error":
+                // If we have a structured error with code
+                const error = message.payload;
+                const errorCode = error.code || "ERR_GENERAL";
+                
+                // If this is a not found error during reconnection, clean up
+                if (isReconnect && errorCode === "ERR_JOB_NOT_FOUND") {
+                    removeJobElement(jobElement);
+                    closeConnection(socket);
+                    return;
+                }
+                
+                // For other errors in new connections, show error and remove job
+                if (!isReconnect) {
+                    removeJobElement(jobElement);
+                    displayError(document.getElementById("response"), error.error || "Unknown error");
+                    closeConnection(socket);
+                } else {
+                    // For reconnections, attempt to reconnect again if allowed
+                    handleReconnection(socket, error.error);
+                }
+                break;
+                
+            case "pong":
+                // Keep-alive response, no action needed
+                break;
+        }
+    };
+    
+    socket.onerror = function(error) {
+        // Handle connection errors
+        handleReconnection(socket, error.message || "Connection error");
+    };
+    
+    socket.onclose = function(event) {
+        // Clean up the ping interval
+        if (socket.pingInterval) {
+            clearInterval(socket.pingInterval);
+        }
+        
+        // Handle unexpected closures and attempt reconnection
+        if (!event.wasClean && !socket.manualClose) {
+            handleReconnection(socket, "Connection closed unexpectedly");
+        }
+    };
+    
+    return socket;
+}
+
+/**
+ * Handles WebSocket reconnection logic with exponential backoff
+ */
+function handleReconnection(socket, errorMessage) {
+    const { jobElement, originalUrl, reconnectAttempt, jobId } = socket;
+    
+    // Don't reconnect if the connection was manually closed or job complete
+    if (socket.manualClose || !jobElement || !jobElement.parentNode) {
+        return;
+    }
+    
+    // Check if we've exceeded max attempts
+    if (reconnectAttempt >= WS_RECONNECT_MAX_ATTEMPTS) {
+        // Failed to reconnect after max attempts
+        const statusEl = jobElement.querySelector(".job-message");
+        if (statusEl) {
+            statusEl.textContent = "Connection failed. Falling back to polling...";
+        }
+        
+        // If we have a job ID, fall back to polling
+        if (jobId) {
+            pollTranscriptionStatus(jobId, jobElement);
+        } else {
+            removeJobElement(jobElement);
+            displayError(document.getElementById("response"), 
+                "Connection failed after multiple attempts: " + errorMessage);
+        }
+        return;
+    }
+    
+    // Update the UI to show reconnect status
+    const statusEl = jobElement.querySelector(".job-message");
+    if (statusEl) {
+        const nextAttempt = reconnectAttempt + 1;
+        const delay = Math.round(Math.min(
+            WS_RECONNECT_BASE_DELAY * Math.pow(2, reconnectAttempt) / 1000,
+            WS_RECONNECT_MAX_DELAY / 1000
+        ));
+        statusEl.textContent = `Connection lost. Reconnecting in ${delay}s (${nextAttempt}/${WS_RECONNECT_MAX_ATTEMPTS})...`;
+    }
+    
+    // Schedule reconnection with exponential backoff
+    const reconnectDelay = Math.min(
+        WS_RECONNECT_BASE_DELAY * Math.pow(2, reconnectAttempt),
+        WS_RECONNECT_MAX_DELAY
+    );
+    
+    setTimeout(() => {
+        if (jobElement && jobElement.parentNode) {  // Check if element still exists
+            createWebSocketConnection(
+                originalUrl, 
+                jobElement, 
+                reconnectAttempt + 1, 
+                true, 
+                jobId
+            );
+        }
+    }, reconnectDelay);
+}
+
+/**
+ * Requests the current status of a job
+ */
+function requestJobStatus(socket, jobId) {
+    if (socket && socket.readyState === WebSocket.OPEN) {
+        const message = {
+            type: "status",
+            payload: { id: jobId }
+        };
+        socket.send(JSON.stringify(message));
+    }
+}
+
+/**
+ * Process transcription using WebSockets for real-time updates
+ */
+async function processWithWebSocket(url) {
+    try {
+        // Create job entry with pending status (we don't have ID yet)
+        const jobElement = createJobElement(url);
+        
+        // Create WebSocket connection with reconnection support
+        const socket = createWebSocketConnection(url, jobElement);
         
     } catch (error) {
         displayError(document.getElementById("response"), error.message);
@@ -182,15 +331,19 @@ function handleProgressUpdate(data, socket, jobElement) {
     
     // Store job ID on the element for future reference
     if (data.id) {
-        jobElement.dataset.jobId = data.id;
+        const jobId = data.id;
+        jobElement.dataset.jobId = jobId;
         
-        // Add this connection to the active connections map
+        // Set the job ID on the socket for reconnection purposes
         if (socket) {
-            activeConnections.set(data.id, socket);
+            socket.jobId = jobId;
+            
+            // Add this connection to the active connections map
+            activeConnections.set(jobId, socket);
         }
         
         // Add to active jobs map
-        activeJobs.set(data.id, jobElement);
+        activeJobs.set(jobId, jobElement);
     }
     
     // Update progress bar
@@ -202,15 +355,37 @@ function handleProgressUpdate(data, socket, jobElement) {
     }
     
     // Update message
-    if (data.message) {
-        const messageElement = jobElement.querySelector(".job-message");
-        if (messageElement) {
-            messageElement.textContent = data.message;
+    let fullMessage = data.message || "";
+    
+    // Add ETA if available
+    if (data.eta !== undefined && data.eta > 0) {
+        // Format the ETA
+        let etaDisplay;
+        if (data.eta > 60) {
+            const minutes = Math.floor(data.eta / 60);
+            const seconds = data.eta % 60;
+            etaDisplay = `${minutes}m ${seconds}s`;
+        } else {
+            etaDisplay = `${data.eta}s`;
         }
+        
+        // Add ETA to message
+        fullMessage += ` (ETA: ${etaDisplay})`;
     }
     
-    // Update stages based on progress
-    updateJobStages(jobElement, data);
+    // Update the message element
+    const messageElement = jobElement.querySelector(".job-message");
+    if (messageElement && fullMessage) {
+        messageElement.textContent = fullMessage;
+    }
+    
+    // Update detailed stages information
+    if (jobElement.querySelector(".detailed-progress")) {
+        updateDetailedStages(jobElement, data);
+    } else {
+        // Use simpler stage indicators if detailed view not available
+        updateJobStages(jobElement, data);
+    }
     
     // If completed, show transcription
     if (data.status === "completed") {
@@ -218,7 +393,10 @@ function handleProgressUpdate(data, socket, jobElement) {
         fetchTranscriptionData(data.id, jobElement);
         
         // Close the WebSocket connection for this job
-        closeConnection(socket);
+        if (socket) {
+            socket.manualClose = true; // Mark that we're deliberately closing
+            closeConnection(socket);
+        }
     } 
     // If failed, show error and remove job
     else if (data.status === "failed") {
@@ -229,7 +407,85 @@ function handleProgressUpdate(data, socket, jobElement) {
         setTimeout(() => removeJobElement(jobElement), 3000);
         
         // Close the WebSocket connection for this job
-        closeConnection(socket);
+        if (socket) {
+            socket.manualClose = true; // Mark that we're deliberately closing
+            closeConnection(socket);
+        }
+    }
+}
+
+/**
+ * Updates detailed stages information when available
+ */
+function updateDetailedStages(jobElement, data) {
+    const { progress, stage, substage } = data;
+    
+    // Find all stage indicators
+    const stageElements = jobElement.querySelectorAll(".stage-item");
+    if (!stageElements.length) return;
+    
+    // Reset all stages
+    stageElements.forEach(el => {
+        el.classList.remove("active", "completed", "failed");
+    });
+    
+    // Get the current stage element
+    let currentStageEl = null;
+    let currentSubstageEl = null;
+    
+    if (data.status === "failed") {
+        // Mark all as failed
+        stageElements.forEach(el => el.classList.add("failed"));
+        return;
+    }
+    
+    if (data.status === "completed") {
+        // Mark all as completed
+        stageElements.forEach(el => el.classList.add("completed"));
+        return;
+    }
+    
+    // Map stages and substages to elements
+    const stageMap = {
+        "download": {
+            element: stageElements[0],
+            substages: {
+                "preparing": 0,
+                "video": 1, 
+                "audio": 2
+            }
+        },
+        "process": {
+            element: stageElements[1],
+            substages: {
+                "analyzing": 0,
+                "transcribing": 1,
+                "finalizing": 2
+            }
+        }
+    };
+    
+    // Mark stages up to current as completed
+    let foundCurrent = false;
+    for (const [stageName, stageData] of Object.entries(stageMap)) {
+        if (foundCurrent) break;
+        
+        if (stageName === stage) {
+            // This is the current stage
+            stageData.element.classList.add("active");
+            foundCurrent = true;
+            
+            // Update substage if available
+            if (substage && substage in stageData.substages) {
+                const substageEl = stageData.element.querySelector(`.substage-${stageData.substages[substage]}`);
+                if (substageEl) {
+                    substageEl.classList.add("active");
+                }
+            }
+        } else {
+            // This stage is already completed
+            stageData.element.classList.add("completed");
+        }
     }
 }
 
@@ -339,13 +595,28 @@ function cancelJob(jobId, jobElement) {
  * Closes a WebSocket connection and cleans up resources
  */
 function closeConnection(socket) {
-    if (socket) {
-        if (socket.readyState === WebSocket.OPEN || 
-            socket.readyState === WebSocket.CONNECTING) {
-            socket.close();
-        }
-        
-        // Clean up from active connections map
+    if (!socket) return;
+    
+    // Mark the socket as being manually closed to prevent auto-reconnect
+    socket.manualClose = true;
+    
+    // Clear ping interval if exists
+    if (socket.pingInterval) {
+        clearInterval(socket.pingInterval);
+        socket.pingInterval = null;
+    }
+    
+    // Close the connection if open or connecting
+    if (socket.readyState === WebSocket.OPEN || 
+        socket.readyState === WebSocket.CONNECTING) {
+        socket.close();
+    }
+    
+    // Clean up from active connections map
+    if (socket.jobId) {
+        activeConnections.delete(socket.jobId);
+    } else {
+        // Fallback for sockets without jobId
         for (const [id, conn] of activeConnections.entries()) {
             if (conn === socket) {
                 activeConnections.delete(id);

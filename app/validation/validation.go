@@ -28,6 +28,11 @@ func (v *Validator) ValidateURL(urlStr string) error {
 	// Sanitize URL by trimming spaces
 	urlStr = strings.TrimSpace(urlStr)
 	
+	// Basic sanity check to prevent XSS
+	if strings.Contains(strings.ToLower(urlStr), "javascript:") {
+		return errors.InvalidInput(op, nil, "Invalid URL format")
+	}
+	
 	// Parse URL
 	parsedURL, err := url.Parse(urlStr)
 	if err != nil {
@@ -42,8 +47,11 @@ func (v *Validator) ValidateURL(urlStr string) error {
 	// Basic domain security check
 	if strings.Contains(parsedURL.Hostname(), "localhost") || 
 	   strings.Contains(parsedURL.Hostname(), "127.0.0.1") || 
+	   strings.HasPrefix(parsedURL.Hostname(), "192.168.") ||
+	   strings.HasPrefix(parsedURL.Hostname(), "10.") ||
+	   strings.HasPrefix(parsedURL.Hostname(), "172.") ||
 	   strings.Contains(parsedURL.Hostname(), "::1") {
-		return errors.InvalidInput(op, nil, "Local addresses are not permitted")
+		return errors.InvalidInput(op, nil, "Local and private network addresses are not permitted")
 	}
 
 	// If it's a YouTube URL, perform additional validation
@@ -164,6 +172,23 @@ func (v *Validator) ValidateRequest(r *http.Request, opts RequestValidationOpts)
 	// Content length validation
 	if opts.MaxContentLength > 0 && r.ContentLength > opts.MaxContentLength {
 		return errors.InvalidInput(op, nil, "Request body too large")
+	}
+	
+	// Origin validation for cross-origin requests
+	origin := r.Header.Get("Origin")
+	if origin != "" && r.Host != "" {
+		originURL, err := url.Parse(origin)
+		if err != nil {
+			return errors.InvalidInput(op, err, "Invalid Origin header")
+		}
+		
+		// Simple check to detect potential CSRF attempts
+		// In production, this should be enhanced with CSRF tokens
+		if originURL.Host != r.Host && r.Method != "GET" && r.Method != "HEAD" {
+			// Log the incident but don't expose details in the error
+			// This is a basic protection - an actual CSRF token would be better
+			return errors.InvalidInput(op, nil, "Request validation failed")
+		}
 	}
 
 	return nil

@@ -9,3 +9,6 @@ beautifulsoup4>=4.12.2
 requests>=2.31.0
 lxml>=4.9.3
 python-dotenv>=1.0.0
+pydub>=0.25.1
+grpcio>=1.59.0
+grpcio-tools>=1.59.0

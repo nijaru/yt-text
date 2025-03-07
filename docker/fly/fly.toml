@@ -14,11 +14,25 @@ primary_region = "sjc"
   DB_PATH = "/data/urls.db"
   LOG_DIR = "/data/logs"
   VIDEO_MAX_DURATION = "4h"
+  
+  # Whisper Configuration
   WHISPER_MODEL = "base.en"
+  WHISPER_BEAM_SIZE = "5"
+  WHISPER_BEST_OF = "1" 
+  WHISPER_TEMPERATURE = "0.0"
+  WHISPER_VAD_FILTER = "true"
+  WHISPER_VAD_MIN_SILENCE_MS = "300"
+  WHISPER_VAD_SPEECH_PAD_MS = "100"
+  WHISPER_VAD_THRESHOLD = "0.35"
+  WHISPER_BATCH_SIZE = "8"
+  WHISPER_DOWNLOAD_ROOT = "/tmp/models"
+  
+  # Python Environment
   PYTHONDONTWRITEBYTECODE = "1"
   PYTHONUNBUFFERED = "1"
-  WHISPER_DOWNLOAD_ROOT = "/tmp"
   PYTHONPATH = "/app"
+  
+  # Memory Optimization
   PYTORCH_CUDA_ALLOC_CONF = "max_split_size_mb:32"
   MALLOC_ARENA_MAX = "1"
   MALLOC_TRIM_THRESHOLD_ = "100000"

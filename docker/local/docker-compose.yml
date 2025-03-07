@@ -18,7 +18,7 @@ services:
       - SCRIPTS_PATH=/app/scripts
       - VIDEO_PROCESS_TIMEOUT=30m
       - VIDEO_MAX_DURATION=4h
-      - WHISPER_MODEL=base.en
+      - WHISPER_MODEL=medium.en
       - PYTHON_PATH=/app/.venv/bin/python
       - PYTHONDONTWRITEBYTECODE=1
       - PYTHONUNBUFFERED=1
@@ -60,7 +60,7 @@ services:
     environment:
       - PYTHONDONTWRITEBYTECODE=1
       - PYTHONUNBUFFERED=1
-      - WHISPER_MODEL=base.en
+      - WHISPER_MODEL=medium.en
     expose:
       - "50051"
     healthcheck:

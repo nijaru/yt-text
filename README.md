@@ -8,6 +8,8 @@ A standalone version for direct command-line usage is available at `python/scrip
 
 - Download audio from YouTube and other platforms supported by yt-dlp
 - Convert audio to text using Faster Whisper (optimized version of OpenAI Whisper)
+- Memory-optimized streaming audio processing for large videos
+- Real-time progress tracking with detailed status updates
 - Fetch existing YouTube captions when available (with fallback to Whisper)
 - Web server interface with WebSocket support for real-time updates
 - gRPC communication between Go and Python services for improved performance
@@ -31,6 +33,8 @@ A standalone version for direct command-line usage is available at `python/scrip
    ```sh
    cd python && uv sync
    ```
+
+   Note: This project uses uv for Python dependency management with pyproject.toml for configuration and uv.lock for dependency locking.
 
 ## Usage
 
@@ -81,36 +85,7 @@ The web server provides a user-friendly interface for transcribing videos:
 
 ### Deployment
 
-#### Manual Deployment
-
-The application can be deployed to Fly.io:
-
-1. Install the Fly CLI tools
-
-2. Deploy using the provided configuration:
-
-   ```sh
-   make deploy
-   # or
-   fly deploy --config docker/fly/fly.toml
-   ```
-
-3. For more details on deployment configuration, see the files in `docker/fly/`
-
-#### CI/CD Pipeline
-
-This project uses GitHub Actions for automated testing and deployment:
-
-1. **Continuous Integration** - Runs tests, linting, and security scans on all commits and PRs
-   - Go and Python code linting and testing
-   - Security scanning for both languages
-   - Docker image building and vulnerability scanning
-
-2. **Continuous Deployment** - Automatically deploys to Fly.io when CI succeeds on the main branch
-   - Triggered after successful CI runs on the main branch
-   - Deploys the application using the Fly.io CLI
-
-For setup and configuration details, see [CI/CD Documentation](.github/workflows/README.md)
+See [DEPLOYMENT.md](DEPLOYMENT.md) for information on deploying the application to production environments.
 
 ### Command Line
 
@@ -170,6 +145,11 @@ See the README files in each Docker directory for detailed configuration informa
 ## Development Roadmap
 
 See [todo.md](todo.md) for current development priorities and future enhancements.
+
+### Recent Optimizations
+
+- **Memory-Optimized Audio Processing**: Implemented streaming audio processing to significantly reduce memory usage. See [refactor.md](refactor.md) for technical details on this optimization.
+- **Python Dependency Management**: Migrated to uv for faster and more reliable dependency management with pyproject.toml configuration.
 
 ## License
 
