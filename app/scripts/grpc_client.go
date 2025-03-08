@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"io"
 	"time"
-	pb "yt-text/protos/transcribe"
+	pb "yt-text/protos"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"

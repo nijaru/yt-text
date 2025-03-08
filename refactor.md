@@ -77,3 +77,4 @@ The gRPC implementation uses:
 1. Implement disk-based caching for processed chunks to avoid reprocessing on retry
 2. Add memory usage metrics collection to monitor improvements
 3. Implement adaptive chunk sizing based on system memory availability
+4. Add explicit GPU detection before falling back to CPU mode (prioritize CUDA if available)

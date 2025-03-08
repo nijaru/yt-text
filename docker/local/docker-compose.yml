@@ -1,9 +1,13 @@
+# docker/local/docker-compose.yml
+# Note: The Docker build requires git for go mod download in the Alpine image
+
 services:
   app:
     build:
       context: ../..
       dockerfile: docker/local/Dockerfile
     image: yt-text:latest
+    command: /usr/local/bin/yt-text
     environment:
       - ENV=development
       - SERVER_PORT=8080
@@ -19,7 +23,6 @@ services:
       - VIDEO_PROCESS_TIMEOUT=30m
       - VIDEO_MAX_DURATION=4h
       - WHISPER_MODEL=medium.en
-      - PYTHON_PATH=/app/.venv/bin/python
       - PYTHONDONTWRITEBYTECODE=1
       - PYTHONUNBUFFERED=1
       - MIDDLEWARE_ENABLE_RECOVER=true
@@ -35,6 +38,9 @@ services:
       - GRPC_SERVER_ADDRESS=grpc:50051
     ports:
       - "8080:8080"
+    volumes:
+      - logs_data:/app/logs
+      - db_data:/app/data
     tmpfs:
       - /tmp
     healthcheck:
@@ -48,26 +54,27 @@ services:
         max-size: "10m"
         max-file: "3"
     depends_on:
-      grpc:
-        condition: service_healthy
+      - grpc
 
   grpc:
     build:
       context: ../..
       dockerfile: docker/local/Dockerfile
     image: yt-text:latest
-    command: make grpc-server
+    command: python -m scripts.grpc.start_server 50051
     environment:
       - PYTHONDONTWRITEBYTECODE=1
       - PYTHONUNBUFFERED=1
       - WHISPER_MODEL=medium.en
+      - LOG_DIR=/app/logs
+      - DB_PATH=/app/data/urls.db
+    volumes:
+      - logs_data:/app/logs
+      - db_data:/app/data
     expose:
       - "50051"
     healthcheck:
-      test: ["CMD", "nc", "-z", "localhost", "50051"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      disable: true
     logging:
       driver: "json-file"
       options:
@@ -77,3 +84,7 @@ services:
 networks:
   default:
     driver: bridge
+
+volumes:
+  logs_data:
+  db_data:

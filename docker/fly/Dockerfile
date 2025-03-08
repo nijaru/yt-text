@@ -1,3 +1,6 @@
+# Production multi-stage Docker build
+# Note: git is required for go mod download to work with Alpine
+
 FROM golang:1.24-alpine AS builder
 WORKDIR /src
 
@@ -15,7 +18,7 @@ ENV GOMEMLIMIT=${GOMEMLIMIT:-1024MiB}
 ENV GOAMD64=v3
 
 # Install required dependencies for Go build with CGO
-RUN apk add --no-cache gcc musl-dev
+RUN apk add --no-cache gcc musl-dev git
 
 COPY app/go.mod app/go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod \
@@ -29,6 +32,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     -gcflags='-m=2' \
     -tags 'netgo osusergo static_build' \
     -trimpath \
+    -mod=mod \
     -o /bin/main .
 
 # Python dependencies stage - separate to improve caching

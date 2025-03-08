@@ -1,6 +1,12 @@
 import argparse
 import json
 import sys
+import logging
+import requests
+
+# Configure logging to use stderr instead of stdout
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s", stream=sys.stderr)
+logger = logging.getLogger(__name__)
 
 import yt_dlp
 
@@ -95,6 +101,7 @@ def validate_url(url: str) -> dict:
         result["valid"] = False
     except Exception as e:
         import traceback
+
         result["error"] = f"Unexpected error: {str(e)}\n{traceback.format_exc()}"
         result["valid"] = False
 
@@ -109,48 +116,41 @@ def main():
     url = args.url.strip()
 
     if not url:
-        error_response = {
-            "valid": False,
-            "duration": 0,
-            "format": "",
-            "error": "No URL provided.",
-            "url": None,
-        }
-        print(json.dumps(error_response))
         sys.exit(1)
-
-    formatted_result = None
 
     try:
         result = validate_url(url)
 
         # Standardize the JSON response
-        formatted_result = {
+        response = {
             "valid": result["valid"],
             "duration": result["duration"],
             "format": result["format"],
             "error": result["error"],
             "url": result["url"],
         }
+        
+        # Output the JSON response to stdout
+        sys.stdout.write(json.dumps(response))
+        sys.stdout.flush()
 
         if not result["valid"]:
             sys.exit(1)  # Exit with status 1 for invalid URL
 
     except Exception as e:
         # Catch any unexpected exceptions and format the error response
-        formatted_result = {
+        response = {
             "valid": False,
             "duration": 0,
             "format": "",
             "error": f"Critical error: {str(e)}",
             "url": url,
         }
-        sys.exit(2)  # Exit with status 2 for critical errors
-
-    finally:
+        
         # Output the JSON response to stdout
-        print(json.dumps(formatted_result))
+        sys.stdout.write(json.dumps(response))
         sys.stdout.flush()
+        sys.exit(2)  # Exit with status 2 for critical errors
 
 
 if __name__ == "__main__":

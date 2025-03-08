@@ -1,4 +1,5 @@
 import argparse
+import contextlib
 import hashlib
 import json
 import re
@@ -6,7 +7,6 @@ import shutil
 from pathlib import Path
 from urllib.parse import urlparse
 
-import torch
 from transcription import Transcriber
 
 
@@ -77,8 +77,7 @@ def extract_root_domain(url: str) -> str:
         if domain.startswith("www."):
             domain = domain[4:]
         # Extract the first part of the domain
-        root_domain = domain.split(".")[0]
-        return root_domain
+        return domain.split(".")[0]
     except Exception:
         return "media"
 
@@ -161,8 +160,7 @@ def load_transcription_result(transcriber: Transcriber, url: str) -> dict:
     Returns:
         dict: Transcription result containing 'text' and optionally 'error' and 'title'.
     """
-    result = transcriber.process_url(url)
-    return result
+    return transcriber.process_url(url)
 
 
 def check_transcript_exists(url: str, transcripts_dir: Path, mapping: dict) -> tuple:
@@ -180,17 +178,13 @@ def check_transcript_exists(url: str, transcripts_dir: Path, mapping: dict) -> t
     if url in mapping:
         existing_transcript = transcripts_dir / mapping[url]
         if existing_transcript.exists():
-            print(f"Transcript already exists for {url}: {existing_transcript}")
             return True, existing_transcript
-        else:
-            print(f"Mapping exists but file missing for {url}. Reprocessing.")
 
     else:
         expected_filename = get_expected_transcript_filename(url)
         expected_path = transcripts_dir / expected_filename
 
         if expected_path.exists():
-            print(f"Transcript already exists for {url}: {expected_path}")
             mapping[url] = expected_filename  # Update mapping
             return True, expected_path
 
@@ -227,7 +221,6 @@ def save_transcript(transcript_path: Path, formatted_text: str) -> None:
     """
     with transcript_path.open("w", encoding="utf-8") as f:
         f.write(formatted_text)
-    print(f"Saved transcript to {transcript_path}")
 
 
 def update_mapping(mapping: dict, url: str, transcript_filename: str) -> None:
@@ -260,8 +253,6 @@ def process_single_url(
             message: Additional information
     """
     try:
-        print(f"Processing URL: {url}")
-
         # Step 1: Check if transcript exists
         exists, transcript_path = check_transcript_exists(url, transcripts_dir, mapping)
         if exists:
@@ -271,7 +262,6 @@ def process_single_url(
         result = load_transcription_result(transcriber, url)
         if result.get("error"):
             error_msg = result["error"]
-            print(f"Error processing {url}: {error_msg}")
             return ("failed", error_msg)
 
         # Step 3: Format the transcript
@@ -290,7 +280,6 @@ def process_single_url(
         return ("success", f"Transcript saved at {transcript_path}")
 
     except Exception as e:
-        print(f"Unexpected error processing {url}: {e}")
         return ("failed", str(e))
 
 
@@ -388,7 +377,6 @@ def get_urls(args: argparse.Namespace) -> list:
         urls.extend([url.strip() for url in arg_url.split(",") if url.strip()])
 
     if not urls:
-        print("No valid URLs provided.")
         return []
     return urls
 
@@ -422,12 +410,10 @@ def cleanup_audio_directory(audio_dir: Path) -> None:
         audio_dir (Path): Path to the audio directory.
     """
     if audio_dir.exists() and audio_dir.is_dir():
-        try:
+        with contextlib.suppress(Exception):
             shutil.rmtree(audio_dir)
-        except Exception as e:
-            print(f"Failed to clean up audio directory {audio_dir}: {e}")
     else:
-        print(f"Audio directory does not exist or is not a directory: {audio_dir}")
+        pass
 
 
 def print_summary(summary: dict) -> None:
@@ -437,17 +423,9 @@ def print_summary(summary: dict) -> None:
     Args:
         summary (dict): Summary dictionary containing counts and failure details.
     """
-    print("\n=== Processing Summary ===")
-    print(f"Total URLs: {summary['total']}")
-    print(f"Processed: {summary['processed']}")
-    print(f" - Successful: {summary['success']}")
-    print(f" - Failed: {summary['failed']}")
-    print(f"Skipped (transcript already exists): {summary['skipped']}")
     if summary["failures"]:
-        print("\n--- Failures ---")
-        for failure in summary["failures"]:
-            print(f"URL: {failure['url']}\nError: {failure['error']}\n")
-    print("==========================\n")
+        for _failure in summary["failures"]:
+            pass
 
 
 def main():
@@ -482,7 +460,6 @@ def main():
         cleanup_audio_directory(audio_dir)
         # Print summary
         print_summary(summary)
-        print("Processing completed.")
 
 
 if __name__ == "__main__":

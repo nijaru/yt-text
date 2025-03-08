@@ -12,7 +12,7 @@ func (r *ScriptRunner) Transcribe(
 	url string,
 	opts map[string]string,
 	enableConstraints bool,
-) (TranscriptionResult, error) {
+) (*TranscriptionResult, error) {
 	const op = "ScriptRunner.Transcribe"
 	var result TranscriptionResult
 
@@ -27,11 +27,11 @@ func (r *ScriptRunner) Transcribe(
 
 	output, err := r.runScript(ctx, "api.py", args, flags)
 	if err != nil {
-		return result, newScriptError(op, err, "transcription failed")
+		return nil, newScriptError(op, err, "transcription failed")
 	}
 
 	if err := unmarshalResult(output, &result); err != nil {
-		return result, newScriptError(op, err, "failed to parse transcription result")
+		return nil, newScriptError(op, err, "failed to parse transcription result")
 	}
 	
 	// Set source to Whisper if not specified
@@ -39,7 +39,7 @@ func (r *ScriptRunner) Transcribe(
 		result.Source = "whisper"
 	}
 
-	return result, nil
+	return &result, nil
 }
 
 // FetchYouTubeCaptions attempts to get captions from YouTube API

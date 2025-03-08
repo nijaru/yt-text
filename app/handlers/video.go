@@ -3,28 +3,31 @@ package handlers
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"math"
 	"strings"
 	"time"
-	ytError "yt-text/errors"
-	"yt-text/logger"
 	"yt-text/models"
 	"yt-text/services/video"
 
 	"github.com/gofiber/contrib/websocket"
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
+	"github.com/rs/zerolog"
 )
 
 type VideoHandler struct {
 	service video.Service
+	log     zerolog.Logger
 }
 
 func NewVideoHandler(service video.Service) *VideoHandler {
 	return &VideoHandler{
 		service: service,
+		log: zerolog.New(zerolog.ConsoleWriter{Out: zerolog.NewConsoleWriter()}).
+			With().
+			Timestamp().
+			Logger(),
 	}
 }
 
@@ -53,10 +56,7 @@ func (h *VideoHandler) TranscribeVideo(c *fiber.Ctx) error {
 		}
 		
 		if err := c.BodyParser(&req); err != nil {
-			return &errors.AppError{
-				Code:    fiber.StatusBadRequest,
-				Message: "Invalid request body",
-			}
+			return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 		}
 		url = req.URL
 	} else {
@@ -65,10 +65,7 @@ func (h *VideoHandler) TranscribeVideo(c *fiber.Ctx) error {
 	}
 	
 	if url == "" {
-		return &errors.AppError{
-			Code:    fiber.StatusBadRequest,
-			Message: "URL is required",
-		}
+		return fiber.NewError(fiber.StatusBadRequest, "URL is required")
 	}
 	
 	// Start transcription process
@@ -88,10 +85,7 @@ func (h *VideoHandler) TranscribeVideo(c *fiber.Ctx) error {
 func (h *VideoHandler) GetTranscription(c *fiber.Ctx) error {
 	id := c.Params("id")
 	if id == "" {
-		return &errors.AppError{
-			Code:    fiber.StatusBadRequest,
-			Message: "ID is required",
-		}
+		return fiber.NewError(fiber.StatusBadRequest, "ID is required")
 	}
 	
 	// Get the video record
@@ -155,7 +149,7 @@ type progressUpdate struct {
 func (h *VideoHandler) TranscribeWebSocket(c *websocket.Conn) {
 	// Create a unique connection ID
 	connID := uuid.New().String()
-	logger.Info("WebSocket connection established", "conn_id", connID)
+	h.log.Info().Str("conn_id", connID).Msg("WebSocket connection established")
 	
 	// Set up context with timeout for the entire WebSocket session
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Minute)
@@ -170,7 +164,7 @@ func (h *VideoHandler) TranscribeWebSocket(c *websocket.Conn) {
 		for {
 			messageType, msg, err := c.ReadMessage()
 			if err != nil {
-				logger.Error("WebSocket read error", "error", err, "conn_id", connID)
+				h.log.Error().Err(err).Str("conn_id", connID).Msg("WebSocket read error")
 				errorChannel <- err
 				return
 			}
@@ -183,7 +177,7 @@ func (h *VideoHandler) TranscribeWebSocket(c *websocket.Conn) {
 			// Parse message
 			var wsMsg webSocketMessage
 			if err := json.Unmarshal(msg, &wsMsg); err != nil {
-				logger.Error("WebSocket message parse error", "error", err, "conn_id", connID)
+				h.log.Error().Err(err).Str("conn_id", connID).Msg("WebSocket message parse error")
 				sendErrorMessage(c, "Invalid message format", ErrorCodeGeneral)
 				continue
 			}
@@ -197,7 +191,7 @@ func (h *VideoHandler) TranscribeWebSocket(c *websocket.Conn) {
 				// Handle transcription request
 				var req transcribeRequest
 				if err := json.Unmarshal(wsMsg.Payload, &req); err != nil {
-					logger.Error("Invalid transcribe payload", "error", err, "conn_id", connID, "request_id", requestID)
+					h.log.Error().Err(err).Str("conn_id", connID).Str("request_id", requestID).Msg("Invalid transcribe payload")
 					sendErrorMessage(c, "Invalid transcribe request format", ErrorCodeGeneral, requestID)
 					continue
 				}
@@ -215,7 +209,7 @@ func (h *VideoHandler) TranscribeWebSocket(c *websocket.Conn) {
 				// Handle cancellation request
 				var req cancelRequest
 				if err := json.Unmarshal(wsMsg.Payload, &req); err != nil {
-					logger.Error("Invalid cancel payload", "error", err, "conn_id", connID, "request_id", requestID)
+					h.log.Error().Err(err).Str("conn_id", connID).Str("request_id", requestID).Msg("Invalid cancel payload")
 					sendErrorMessage(c, "Invalid cancel request format", ErrorCodeGeneral, requestID)
 					continue
 				}
@@ -231,14 +225,14 @@ func (h *VideoHandler) TranscribeWebSocket(c *websocket.Conn) {
 					// First check if job exists and is in processing state
 					video, err := h.service.GetTranscription(ctx, req.ID)
 					if err != nil {
-						logger.Error("Job not found for cancellation", "error", err, "job_id", req.ID, "request_id", requestID)
+						h.log.Error().Err(err).Str("job_id", req.ID).Str("request_id", requestID).Msg("Job not found for cancellation")
 						errorChannel <- fmt.Errorf("%s: %w", ErrorCodeJobNotFound, err)
 						return
 					}
 					
 					// Check if job is in processing state
 					if video.Status != models.StatusProcessing {
-						logger.Warn("Attempted to cancel non-processing job", "job_id", req.ID, "status", video.Status, "request_id", requestID)
+						h.log.Warn().Str("job_id", req.ID).Str("status", string(video.Status)).Str("request_id", requestID).Msg("Attempted to cancel non-processing job")
 						errorChannel <- fmt.Errorf("%s: only in-progress jobs can be canceled", ErrorCodeGeneral)
 						return
 					}
@@ -257,7 +251,7 @@ func (h *VideoHandler) TranscribeWebSocket(c *websocket.Conn) {
 						defer saveCancel()
 						
 						if saveErr := h.service.GetRepository().Save(saveCtx, video); saveErr != nil {
-							logger.Error("Failed to save canceled status", "error", saveErr, "job_id", req.ID)
+							h.log.Error().Err(saveErr).Str("job_id", req.ID).Msg("Failed to save canceled status")
 						}
 						
 						// Send cancellation success update
@@ -270,7 +264,7 @@ func (h *VideoHandler) TranscribeWebSocket(c *websocket.Conn) {
 						}
 					} else {
 						// Cancellation failed
-						logger.Error("Failed to cancel job", "job_id", req.ID, "request_id", requestID)
+						h.log.Error().Str("job_id", req.ID).Str("request_id", requestID).Msg("Failed to cancel job")
 						errorChannel <- fmt.Errorf("%s: unable to cancel job - job may be already completed", ErrorCodeGeneral)
 					}
 				}()
@@ -286,7 +280,7 @@ func (h *VideoHandler) TranscribeWebSocket(c *websocket.Conn) {
 				}
 				
 				if err := json.Unmarshal(wsMsg.Payload, &req); err != nil {
-					logger.Error("Invalid status request", "error", err, "conn_id", connID, "request_id", requestID)
+					h.log.Error().Err(err).Str("conn_id", connID).Str("request_id", requestID).Msg("Invalid status request")
 					sendErrorMessage(c, "Invalid status request format", ErrorCodeGeneral, requestID)
 					continue
 				}
@@ -302,7 +296,7 @@ func (h *VideoHandler) TranscribeWebSocket(c *websocket.Conn) {
 					// Get the video record
 					video, err := h.service.GetTranscription(ctx, req.ID)
 					if err != nil {
-						logger.Error("Job not found for status request", "error", err, "job_id", req.ID, "request_id", requestID)
+						h.log.Error().Err(err).Str("job_id", req.ID).Str("request_id", requestID).Msg("Job not found for status request")
 						errorChannel <- fmt.Errorf("%s: %w", ErrorCodeJobNotFound, err)
 						return
 					}
@@ -380,7 +374,7 @@ func (h *VideoHandler) TranscribeWebSocket(c *websocket.Conn) {
 				}()
 				
 			default:
-				logger.Warn("Unknown message type received", "type", wsMsg.Type, "conn_id", connID, "request_id", requestID)
+				h.log.Warn().Str("type", wsMsg.Type).Str("conn_id", connID).Str("request_id", requestID).Msg("Unknown message type received")
 				sendErrorMessage(c, "Unknown message type", ErrorCodeGeneral, requestID)
 			}
 		}
@@ -392,7 +386,7 @@ func (h *VideoHandler) TranscribeWebSocket(c *websocket.Conn) {
 		case update := <-updateChannel:
 			// Send progress update
 			if err := sendMessage(c, "progress", update); err != nil {
-				logger.Error("Failed to send progress update", "error", err, "conn_id", connID)
+				h.log.Error().Err(err).Str("conn_id", connID).Msg("Failed to send progress update")
 				return
 			}
 			
@@ -415,13 +409,13 @@ func (h *VideoHandler) TranscribeWebSocket(c *websocket.Conn) {
 			}
 			
 			// Send error and close connection
-			logger.Error("Transcription error", "error", errMsg, "code", errCode, "conn_id", connID)
+			h.log.Error().Str("error", errMsg).Str("code", errCode).Str("conn_id", connID).Msg("Transcription error")
 			sendErrorMessage(c, "Transcription error: "+errMsg, errCode)
 			return
 			
 		case <-ctx.Done():
 			// Context timeout or cancellation
-			logger.Warn("WebSocket context done", "error", ctx.Err(), "conn_id", connID)
+			h.log.Warn().Err(ctx.Err()).Str("conn_id", connID).Msg("WebSocket context done")
 			sendErrorMessage(c, "Connection timeout", ErrorCodeTimeout)
 			return
 		}
@@ -440,7 +434,11 @@ func startTranscription(
 	// Start transcription
 	video, err := service.Transcribe(ctx, url)
 	if err != nil {
-		logger.Error("Transcription start error", "error", err, "url", url, "request_id", requestID)
+		log := zerolog.New(zerolog.ConsoleWriter{Out: zerolog.NewConsoleWriter()}).
+			With().
+			Timestamp().
+			Logger()
+		log.Error().Err(err).Str("url", url).Str("request_id", requestID).Msg("Transcription start error")
 		errors <- fmt.Errorf("%s: %w", ErrorCodeGeneral, err)
 		return
 	}
@@ -665,10 +663,7 @@ func sendErrorMessage(c *websocket.Conn, errorMsg string, errorCode string, requ
 func (h *VideoHandler) CancelTranscription(c *fiber.Ctx) error {
 	id := c.Params("id")
 	if id == "" {
-		return &ytError.AppError{
-			Code:    fiber.StatusBadRequest,
-			Message: "ID is required",
-		}
+		return fiber.NewError(fiber.StatusBadRequest, "ID is required")
 	}
 	
 	// First, check if the video exists in the database
@@ -701,7 +696,7 @@ func (h *VideoHandler) CancelTranscription(c *fiber.Ctx) error {
 		// The error is logged but we still return success to the user
 		// since the job was successfully canceled
 		if saveErr := h.service.GetRepository().Save(saveCtx, video); saveErr != nil {
-			logger.Error("Failed to save canceled status", "error", saveErr, "video_id", id)
+			h.log.Error().Err(saveErr).Str("video_id", id).Msg("Failed to save canceled status")
 		}
 		
 		return c.JSON(fiber.Map{

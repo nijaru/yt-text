@@ -142,7 +142,7 @@ func (s *service) startProcessing(ctx context.Context, video *models.Video) (*mo
 		s.logger.Error().Err(err).Str("video_id", video.ID).Msg("Failed to submit job to queue")
 		
 		// Fall back to direct processing if queue is full
-		if errors.Is(err, ErrQueueFull) {
+		if err == ErrQueueFull {
 			s.logger.Warn().Str("video_id", video.ID).Msg("Queue full, falling back to direct processing")
 			go s.processVideo(video)
 		} else {
@@ -553,7 +553,12 @@ func (s *service) doProcessVideo(ctx context.Context, video *models.Video) error
 			Str("language", video.Language).
 			Float64("language_probability", video.LanguageProbability).
 			Str("source", string(video.Source)).
-			Str("storage", video.TranscriptionPath != "" ? "file" : "database").
+			Str("storage", func() string {
+                if video.TranscriptionPath != "" {
+                    return "file"
+                }
+                return "database"
+            }()).
 			Str("status", string(video.Status)).
 			Msg("Updated video with transcription")
 	}

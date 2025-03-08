@@ -280,9 +280,8 @@ func setupRoutes(app *fiber.App, videoService video.Service) {
 	// Create handlers
 	videoHandler := handlers.NewVideoHandler(videoService)
 
-	// API routes
-	app.Post("/api/transcribe", videoHandler.Transcribe)
-	app.Get("/api/transcribe/:id", videoHandler.GetTranscription)
+	// Register routes
+	videoHandler.RegisterRoutes(app)
 
 	// Health check
 	app.Get("/health", handlers.HealthCheck)

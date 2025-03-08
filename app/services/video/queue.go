@@ -5,8 +5,9 @@ import (
 	"errors"
 	"sync"
 	"time"
-	"yt-text/logger"
 	"yt-text/models"
+	
+	"github.com/rs/zerolog"
 )
 
 // Common errors
@@ -132,50 +133,56 @@ func (q *JobQueue) GetJobStatus(jobID string) (bool, time.Time) {
 
 // worker processes jobs from the queue
 func (q *JobQueue) worker(id int, processFunc func(context.Context, *models.Video) error) {
-	logger.Info("Starting worker", "worker_id", id)
+	log := zerolog.New(zerolog.ConsoleWriter{Out: zerolog.NewConsoleWriter()}).
+		With().
+		Timestamp().
+		Int("worker_id", id).
+		Logger()
+		
+	log.Info().Msg("Starting worker")
 
 	for {
 		var job *TranscriptionJob
 		// First check priority queue, then regular queue
 		select {
 		case <-q.quit:
-			logger.Info("Worker shutting down", "worker_id", id)
+			log.Info().Msg("Worker shutting down")
 			return
 		case job = <-q.priorityJobs:
 			// Got a priority job
-			logger.Info("Processing priority job", "worker_id", id, "job_id", job.ID)
+			log.Info().Str("job_id", job.ID).Msg("Processing priority job")
 		default:
 			// No priority job, try regular queue
 			select {
 			case <-q.quit:
-				logger.Info("Worker shutting down", "worker_id", id)
+				log.Info().Msg("Worker shutting down")
 				return
 			case job = <-q.jobs:
 				// Got a regular job
-				logger.Info("Processing regular job", "worker_id", id, "job_id", job.ID)
+				log.Info().Str("job_id", job.ID).Msg("Processing regular job")
 			}
 		}
 
 		// Process the job
-		logger.Info("Started processing job", "worker_id", id, "job_id", job.ID)
+		log.Info().Str("job_id", job.ID).Msg("Started processing job")
 		startTime := time.Now()
 		err := processFunc(job.ctx, job.Video)
 		duration := time.Since(startTime)
 		
 		if err != nil {
-			logger.Error("Job processing failed", "worker_id", id, "job_id", job.ID, "error", err, "duration_ms", duration.Milliseconds())
+			log.Error().Err(err).Str("job_id", job.ID).Int64("duration_ms", duration.Milliseconds()).Msg("Job processing failed")
 		} else {
-			logger.Info("Job processing succeeded", "worker_id", id, "job_id", job.ID, "duration_ms", duration.Milliseconds())
+			log.Info().Str("job_id", job.ID).Int64("duration_ms", duration.Milliseconds()).Msg("Job processing succeeded")
 		}
 
 		// Send result
 		select {
 		case job.result <- err:
 			// Result sent
-			logger.Debug("Job result sent to client", "worker_id", id, "job_id", job.ID)
+			log.Debug().Str("job_id", job.ID).Msg("Job result sent to client")
 		default:
 			// No one listening for result
-			logger.Warn("No listener for job result", "worker_id", id, "job_id", job.ID)
+			log.Warn().Str("job_id", job.ID).Msg("No listener for job result")
 		}
 
 		// Remove from active jobs
@@ -183,7 +190,7 @@ func (q *JobQueue) worker(id int, processFunc func(context.Context, *models.Vide
 		delete(q.activeJobs, job.ID)
 		q.mu.Unlock()
 		
-		logger.Info("Job completed and removed from active jobs", "worker_id", id, "job_id", job.ID)
+		log.Info().Str("job_id", job.ID).Msg("Job completed and removed from active jobs")
 	}
 }
 
@@ -222,10 +229,18 @@ func (q *JobQueue) checkHungJobs() {
 
 	now := time.Now()
 	hungTimeout := 30 * time.Minute
+	
+	log := zerolog.New(zerolog.ConsoleWriter{Out: zerolog.NewConsoleWriter()}).
+		With().
+		Timestamp().
+		Logger()
 
 	for id, job := range q.activeJobs {
 		if now.Sub(job.startTime) > hungTimeout {
-			logger.Warn("Found hung job", "job_id", id, "duration", now.Sub(job.startTime))
+			log.Warn().
+				Str("job_id", id).
+				Dur("duration", now.Sub(job.startTime)).
+				Msg("Found hung job")
 			// Log but don't automatically cancel - that should be a separate policy decision
 		}
 	}

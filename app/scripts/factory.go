@@ -2,8 +2,6 @@ package scripts
 
 import (
 	"context"
-	"fmt"
-	"time"
 )
 
 // TranscriptionClient defines the interface for transcription services

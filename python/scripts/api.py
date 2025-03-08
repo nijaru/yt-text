@@ -1,15 +1,18 @@
 import argparse
 import json
 import sys
+import logging
 
-from transcription import Transcriber
+# Configure logging to use stderr instead of stdout
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s", stream=sys.stderr)
+logger = logging.getLogger(__name__)
+
+from scripts.transcription import Transcriber
 
 
 def main():
     parser = argparse.ArgumentParser(description="Transcribe media")
-    parser.add_argument(
-        "--url", type=str, required=True, help="Media URL(s), comma-separated"
-    )
+    parser.add_argument("--url", type=str, required=True, help="Media URL(s), comma-separated")
     parser.add_argument("--model", default="large-v3-turbo", help="Whisper model to use")
     parser.add_argument(
         "--enable_constraints",
@@ -33,17 +36,6 @@ def main():
     urls = [url.strip() for url in args.url.split(",") if url.strip()]
 
     if not urls:
-        error_response = {
-            "text": None,
-            "model_name": args.model,
-            "duration": 0,
-            "error": "No valid URLs provided.",
-            "title": None,
-            "url": None,
-            "language": None,
-            "language_probability": 0,
-        }
-        print(json.dumps(error_response))
         sys.exit(1)
 
     # If constraints are enabled, limit to one URL
@@ -69,19 +61,15 @@ def main():
         transcriber.close()
 
         # Prepare the final result
-        if len(results) == 1:
-            output = results[0]
-        else:
-            output = results
+        output = results[0] if len(results) == 1 else results
 
         # Format the output to include only necessary fields
         if isinstance(output, dict):
             # Get transcript text and check if it's empty
             transcript_text = output.get("text")
             if transcript_text is None or transcript_text.strip() == "":
-                print(f"DEBUG: Empty transcription detected for URL: {args.url}")
                 output["error"] = "No transcription text was generated"
-                
+
             formatted_result = {
                 "text": output.get("text"),
                 "model_name": output.get("model_name"),
