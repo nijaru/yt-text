@@ -1,0 +1,143 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites><testsuite name="pytest" errors="0" failures="3" skipped="0" tests="10" time="1.403" timestamp="2025-03-06T23:28:14.954897-08:00" hostname="Apple.local"><testcase classname="tests.test_transcription.TestTranscriber" name="test_close_method" time="0.001"><failure message="AssertionError: Expected 'empty_cache' to have been called once. Called 0 times.">self = &lt;MagicMock name='empty_cache' id='4492404608'&gt;
+
+    def assert_called_once(self):
+        """assert that the mock was called only once.
+        """
+        if not self.call_count == 1:
+            msg = ("Expected '%s' to have been called once. Called %s times.%s"
+                   % (self._mock_name or 'mock',
+                      self.call_count,
+                      self._calls_repr()))
+&gt;           raise AssertionError(msg)
+E           AssertionError: Expected 'empty_cache' to have been called once. Called 0 times.
+
+../../../.local/share/mise/installs/python/3.12.8/lib/python3.12/unittest/mock.py:928: AssertionError
+
+During handling of the above exception, another exception occurred:
+
+self = &lt;tests.test_transcription.TestTranscriber testMethod=test_close_method&gt;
+mock_whisper = &lt;MagicMock name='WhisperModel' id='4489987040'&gt;
+mock_gc = &lt;MagicMock name='collect' id='4492391584'&gt;
+mock_cuda_empty = &lt;MagicMock name='empty_cache' id='4492404608'&gt;
+
+    @patch('torch.cuda.empty_cache')
+    @patch('gc.collect')
+    @patch('scripts.transcription.WhisperModel')
+    def test_close_method(self, mock_whisper, mock_gc, mock_cuda_empty):
+        """Test resource cleanup in close method."""
+        # Setup
+        transcriber = Transcriber()
+        transcriber._temp_files = ['/tmp/test1.wav', '/tmp/test2.wav']
+    
+        # Mock file existence check and removal
+        with patch('os.path.exists', return_value=True) as mock_exists:
+            with patch('os.remove') as mock_remove:
+                # Call close method
+                transcriber.close()
+    
+                # Verify cleanup occurred
+                self.assertEqual(mock_remove.call_count, 2)
+&gt;               mock_cuda_empty.assert_called_once()
+E               AssertionError: Expected 'empty_cache' to have been called once. Called 0 times.
+
+tests/test_transcription.py:279: AssertionError</failure></testcase><testcase classname="tests.test_transcription.TestTranscriber" name="test_download_audio_duration_exceeded" time="0.001" /><testcase classname="tests.test_transcription.TestTranscriber" name="test_download_audio_success" time="0.001"><failure message="AssertionError: '/tmp/video123.wav' != '/tmp/video123.mp4'&#10;- /tmp/video123.wav&#10;?               ^^^&#10;+ /tmp/video123.mp4&#10;?               ^^^">self = &lt;tests.test_transcription.TestTranscriber testMethod=test_download_audio_success&gt;
+mock_whisper = &lt;MagicMock name='WhisperModel' id='4492548944'&gt;
+mock_ytdl = &lt;MagicMock name='YoutubeDL' id='4492557296'&gt;
+
+    @patch('yt_dlp.YoutubeDL')
+    @patch('scripts.transcription.WhisperModel')
+    def test_download_audio_success(self, mock_whisper, mock_ytdl):
+        """Test successful audio download."""
+        # Mock YoutubeDL context for info extraction
+        mock_info_instance = MagicMock()
+        mock_info = {
+            'title': 'Test Video',
+            'duration': 300,  # 5 minutes
+            'id': 'video123'
+        }
+        mock_info_instance.extract_info.return_value = mock_info
+    
+        # Mock YoutubeDL context for download
+        mock_download_instance = MagicMock()
+        mock_download_instance.extract_info.return_value = mock_info
+        mock_download_instance.prepare_filename.return_value = '/tmp/video123.mp4'
+    
+        # Set up the two context managers to be called in sequence
+        mock_ytdl.side_effect = [
+            MagicMock(__enter__=MagicMock(return_value=mock_info_instance)),
+            MagicMock(__enter__=MagicMock(return_value=mock_download_instance))
+        ]
+    
+        # Patch os.path functions
+        with patch('os.path.exists', return_value=True):
+            with patch('os.path.splitext', return_value=('/tmp/video123', '.mp4')):
+                with patch('os.path.getsize', return_value=1024):
+                    transcriber = Transcriber()
+                    audio_path, title, duration, video_id = transcriber._download_audio(
+                        'https://www.youtube.com/watch?v=video123',
+                        '/tmp'
+                    )
+    
+                    # Verify correct information was returned
+&gt;                   self.assertEqual(audio_path, '/tmp/video123.mp4')
+E                   AssertionError: '/tmp/video123.wav' != '/tmp/video123.mp4'
+E                   - /tmp/video123.wav
+E                   ?               ^^^
+E                   + /tmp/video123.mp4
+E                   ?               ^^^
+
+tests/test_transcription.py:180: AssertionError</failure></testcase><testcase classname="tests.test_transcription.TestTranscriber" name="test_error_handling" time="0.000" /><testcase classname="tests.test_transcription.TestTranscriber" name="test_get_from_cache_hit" time="0.001" /><testcase classname="tests.test_transcription.TestTranscriber" name="test_get_from_cache_miss" time="0.000" /><testcase classname="tests.test_transcription.TestTranscriber" name="test_init_with_cuda" time="0.000" /><testcase classname="tests.test_transcription.TestTranscriber" name="test_init_with_defaults" time="0.000" /><testcase classname="tests.test_transcription.TestTranscriber" name="test_manage_cache_size" time="0.001"><failure message="AssertionError: Expected 'unlink' to have been called once. Called 2 times.&#10;Calls: [call(), call()].">self = &lt;MagicMock name='mock.unlink' id='4495351376'&gt;
+
+    def assert_called_once(self):
+        """assert that the mock was called only once.
+        """
+        if not self.call_count == 1:
+            msg = ("Expected '%s' to have been called once. Called %s times.%s"
+                   % (self._mock_name or 'mock',
+                      self.call_count,
+                      self._calls_repr()))
+&gt;           raise AssertionError(msg)
+E           AssertionError: Expected 'unlink' to have been called once. Called 2 times.
+E           Calls: [call(), call()].
+
+../../../.local/share/mise/installs/python/3.12.8/lib/python3.12/unittest/mock.py:928: AssertionError
+
+During handling of the above exception, another exception occurred:
+
+self = &lt;tests.test_transcription.TestTranscriber testMethod=test_manage_cache_size&gt;
+mock_whisper = &lt;MagicMock name='WhisperModel' id='4492662000'&gt;
+mock_path = &lt;MagicMock name='Path' id='4492642064'&gt;
+
+    @patch('scripts.transcription.Path')
+    @patch('scripts.transcription.WhisperModel')
+    def test_manage_cache_size(self, mock_whisper, mock_path):
+        """Test cache size management when cache exceeds limit."""
+        # Mock directory structure with files
+        mock_files = []
+        total_size = 0
+    
+        # Create mock files (11GB total to exceed 10GB default)
+        for i in range(5):
+            file_size = 2.2 * 1024 * 1024 * 1024  # 2.2GB each
+            mock_file = MagicMock()
+            mock_file.is_file.return_value = True
+            mock_file.stat.return_value.st_size = file_size
+            mock_file.stat.return_value.st_mtime = 1612345678.0 + i  # Increasingly newer
+            mock_file.name = f"cache_file_{i}.json"
+            mock_files.append(mock_file)
+            total_size += file_size
+    
+        # Setup Path.glob to return our mock files
+        mock_path.return_value.glob.return_value = mock_files
+    
+        # Create transcriber and trigger cache management
+        with patch('os.path.exists', return_value=True):
+            transcriber = Transcriber(max_cache_size_gb=10.0)
+            transcriber._manage_cache_size()
+    
+            # Verify at least one file was removed (oldest first)
+&gt;           mock_files[0].unlink.assert_called_once()
+E           AssertionError: Expected 'unlink' to have been called once. Called 2 times.
+E           Calls: [call(), call()].
+
+tests/test_transcription.py:139: AssertionError</failure></testcase><testcase classname="tests.test_transcription.TestTranscriber" name="test_process_url_integration" time="0.001" /></testsuite></testsuites>
