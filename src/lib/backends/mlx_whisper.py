@@ -12,6 +12,17 @@ class MLXWhisperBackend(TranscriptionBackend):
 
     def __init__(self):
         self._model_cache = {}
+        # Map simple model names to MLX community model repositories
+        self._model_mapping = {
+            "tiny": "mlx-community/whisper-tiny-mlx",
+            "base": "mlx-community/whisper-base-mlx", 
+            "small": "mlx-community/whisper-small-mlx",
+            "medium": "mlx-community/whisper-medium-mlx",
+            "large": "mlx-community/whisper-large-v3-mlx",
+            "large-v1": "mlx-community/whisper-large-v1-mlx",
+            "large-v2": "mlx-community/whisper-large-v2-mlx",
+            "large-v3": "mlx-community/whisper-large-v3-mlx",
+        }
 
     async def is_available(self) -> bool:
         """Check if MLX Whisper is available."""
@@ -74,6 +85,9 @@ class MLXWhisperBackend(TranscriptionBackend):
         if progress_callback:
             progress_callback(30)
 
+        # Map model name to MLX community repository
+        mlx_model = self._model_mapping.get(model, f"mlx-community/whisper-{model}")
+
         # Transcribe with MLX
         kwargs = {}
         if language and language != "auto":
@@ -81,7 +95,7 @@ class MLXWhisperBackend(TranscriptionBackend):
 
         result = mlx_whisper.transcribe(
             audio_path,
-            path_or_hf_repo=model,
+            path_or_hf_repo=mlx_model,
             **kwargs
         )
 
@@ -100,8 +114,8 @@ class MLXWhisperBackend(TranscriptionBackend):
 
     def supports_model(self, model: str) -> bool:
         """Check if model is supported."""
-        return model in ["tiny", "base", "small", "medium", "large"]
+        return model in self._model_mapping
 
     def get_supported_models(self) -> list[str]:
         """Get supported models."""
-        return ["tiny", "base", "small", "medium", "large"]
+        return list(self._model_mapping.keys())

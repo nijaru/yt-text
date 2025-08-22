@@ -30,9 +30,9 @@ class Settings(BaseSettings):
     database_pool_timeout: int = 30
 
     # Paths
-    data_dir: Path = Path("/app/data")
+    data_dir: Path = Path("data")
     temp_dir: Path = Path("/tmp/yt-text")
-    model_dir: Path = Path("/app/models")
+    model_dir: Path = Path("models")
     static_dir: Path = Path("static")
 
     # Transcription
@@ -62,7 +62,7 @@ class Settings(BaseSettings):
 
     # Cache
     cache_enabled: bool = True
-    cache_dir: Path = Path("/app/cache")
+    cache_dir: Path = Path("cache")
     cache_size_limit: int = 1_073_741_824  # 1GB
     cache_ttl: int = 604_800  # 1 week
 
@@ -77,7 +77,7 @@ class Settings(BaseSettings):
     # Logging
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     log_format: Literal["json", "console"] = "console"
-    log_file: Path = Path("/app/logs/app.log")
+    log_file: Path = Path("logs/app.log")
     log_max_size: int = 10_485_760  # 10MB
     log_backup_count: int = 5
 

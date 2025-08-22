@@ -39,10 +39,10 @@ async def provide_backend_factory() -> BackendFactory:
 
 
 async def provide_transcription_service(
-    db_session: AsyncSession = Provide(provide_db_session),
-    download_service: DownloadService = Provide(provide_download_service),
-    cache_service: CacheService = Provide(provide_cache_service),
-    backend_factory: BackendFactory = Provide(provide_backend_factory),
+    db_session: AsyncSession,
+    download_service: DownloadService,
+    cache_service: CacheService,
+    backend_factory: BackendFactory,
 ) -> TranscriptionService:
     """Provide transcription service with all dependencies."""
     return TranscriptionService(

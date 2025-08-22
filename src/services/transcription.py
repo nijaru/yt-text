@@ -1,6 +1,7 @@
 """Transcription service orchestrating download and transcription."""
 
 import asyncio
+import logging
 from datetime import datetime
 from typing import AsyncIterator, Optional
 from uuid import UUID
@@ -39,6 +40,7 @@ class TranscriptionService:
         language: Optional[str] = None,
         ip_address: Optional[str] = None,
         user_agent: Optional[str] = None,
+        start_processing: bool = True,
     ) -> TranscriptionJob:
         """Create a new transcription job."""
         # Validate URL
@@ -83,8 +85,8 @@ class TranscriptionService:
         await self.db_session.commit()
         await self.db_session.refresh(job)
 
-        # Start background processing
-        if len(self._running_jobs) < settings.max_concurrent_jobs:
+        # Start background processing if requested
+        if start_processing and len(self._running_jobs) < settings.max_concurrent_jobs:
             task = asyncio.create_task(self._process_job(job.id))
             self._running_jobs[job.id] = task
         
@@ -158,8 +160,9 @@ class TranscriptionService:
 
             # Download audio
             try:
+                download_callback = self._create_progress_callback(job_id, 5, 0.3)
                 audio_info = await self.download_service.download_audio(
-                    job.url, progress_callback=lambda p: self._update_progress(job_id, 5 + int(p * 0.3))
+                    job.url, progress_callback=download_callback
                 )
                 job.title = audio_info.get("title")
                 job.duration = audio_info.get("duration")
@@ -177,11 +180,12 @@ class TranscriptionService:
 
             # Transcribe audio
             try:
+                transcribe_callback = self._create_progress_callback(job_id, 35, 0.6)
                 result = await backend.transcribe(
                     audio_info["audio_path"],
                     model=job.model_requested,
                     language=job.language,
-                    progress_callback=lambda p: self._update_progress(job_id, 35 + int(p * 0.6)),
+                    progress_callback=transcribe_callback,
                 )
                 
                 # Update job with results
@@ -229,6 +233,29 @@ class TranscriptionService:
             # Clean up audio file
             if 'audio_info' in locals() and audio_info.get("audio_path"):
                 await self.download_service.cleanup_file(audio_info["audio_path"])
+
+    def _create_progress_callback(self, job_id: UUID, base_progress: int, scale: float) -> callable:
+        """Create a sync progress callback that schedules async updates."""
+        def sync_callback(progress: int) -> None:
+            final_progress = base_progress + int(progress * scale)
+            # Try to schedule the async update, but don't fail if no event loop
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(self._update_progress_async(job_id, final_progress))
+            except RuntimeError:
+                # No event loop running, skip progress update
+                logging.debug(f"Skipping progress update for job {job_id}: no event loop")
+        return sync_callback
+
+    async def _update_progress_async(self, job_id: UUID, progress: int) -> None:
+        """Update job progress asynchronously."""
+        try:
+            job = await self.get_job(job_id)
+            if job:
+                job.progress = min(progress, 100)
+                await self.db_session.commit()
+        except Exception as e:
+            logging.warning(f"Failed to update progress for job {job_id}: {e}")
 
     async def _update_progress(self, job_id: UUID, progress: int) -> None:
         """Update job progress."""

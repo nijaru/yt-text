@@ -61,11 +61,12 @@ async def transcribe_url(url: str, model: str = "base", language: str = None):
             if language:
                 click.echo(f"Language: {language}")
             
-            # Create job
+            # Create job without starting background processing
             job = await transcription_service.create_job(
                 url=url,
                 model=model,
                 language=language,
+                start_processing=False,
             )
             
             click.echo(f"Job created: {job.id}")
@@ -86,28 +87,27 @@ async def transcribe_url(url: str, model: str = "base", language: str = None):
             # Wait for processing
             click.echo("Processing...")
             
-            # Monitor progress
-            last_progress = 0
-            async for update in transcription_service.stream_job_updates(job.id):
-                if update.progress > last_progress:
-                    click.echo(f"Progress: {update.progress}%")
-                    last_progress = update.progress
-                
-                if update.status == "completed":
-                    click.echo("✅ Transcription completed!")
-                    click.echo(f"Title: {update.title or 'Unknown'}")
-                    if update.duration:
-                        click.echo(f"Duration: {update.duration}s")
-                    click.echo(f"Model used: {update.model_used}")
-                    click.echo(f"Language: {update.detected_language or 'unknown'}")
-                    click.echo(f"Word count: {update.word_count}")
-                    click.echo(f"Processing time: {update.processing_time_ms}ms")
-                    click.echo("\n--- Transcription ---")
-                    click.echo(update.text)
-                    break
-                elif update.status == "failed":
-                    click.echo(f"❌ Transcription failed: {update.error}")
-                    sys.exit(1)
+            # For CLI, process the job directly rather than background processing
+            # This avoids event loop issues with background tasks
+            await transcription_service._process_job(job.id)
+            
+            # Get final job status
+            final_job = await transcription_service.get_job(job.id)
+            
+            if final_job.status == "completed":
+                click.echo("✅ Transcription completed!")
+                click.echo(f"Title: {final_job.title or 'Unknown'}")
+                if final_job.duration:
+                    click.echo(f"Duration: {final_job.duration}s")
+                click.echo(f"Model used: {final_job.model_used}")
+                click.echo(f"Language: {final_job.detected_language or 'unknown'}")
+                click.echo(f"Word count: {final_job.word_count}")
+                click.echo(f"Processing time: {final_job.processing_time_ms}ms")
+                click.echo("\n--- Transcription ---")
+                click.echo(final_job.text)
+            elif final_job.status == "failed":
+                click.echo(f"❌ Transcription failed: {final_job.error}")
+                sys.exit(1)
                     
     finally:
         await engine.dispose()

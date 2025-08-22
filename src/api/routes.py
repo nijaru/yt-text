@@ -6,6 +6,7 @@ from litestar import Controller, Request, WebSocket, get, post, websocket
 from litestar.di import Provide
 from litestar.exceptions import HTTPException, NotFoundException
 
+from src.core.deps import provide_transcription_service
 from src.core.models import (
     ErrorResponse,
     JobResponse,
@@ -26,11 +27,11 @@ class TranscriptionController(Controller):
         self,
         request: Request,
         data: TranscribeRequest,
-        service: TranscriptionService = Provide(),
+        transcription_service: TranscriptionService,
     ) -> JobResponse:
         """Submit a URL for transcription."""
         try:
-            job = await service.create_job(
+            job = await transcription_service.create_job(
                 url=data.url,
                 model=data.model,
                 language=data.language,
@@ -51,10 +52,10 @@ class TranscriptionController(Controller):
     async def get_job_status(
         self,
         job_id: UUID,
-        service: TranscriptionService = Provide(),
+        transcription_service: TranscriptionService,
     ) -> JobStatusResponse:
         """Get job status and progress."""
-        job = await service.get_job(job_id)
+        job = await transcription_service.get_job(job_id)
         if not job:
             raise NotFoundException(detail=f"Job {job_id} not found")
 
@@ -73,10 +74,10 @@ class TranscriptionController(Controller):
     async def get_transcription_result(
         self,
         job_id: UUID,
-        service: TranscriptionService = Provide(),
+        transcription_service: TranscriptionService,
     ) -> TranscriptionResult:
         """Get completed transcription result."""
-        job = await service.get_job(job_id)
+        job = await transcription_service.get_job(job_id)
         if not job:
             raise NotFoundException(detail=f"Job {job_id} not found")
 
@@ -110,10 +111,10 @@ class TranscriptionController(Controller):
     async def retry_job(
         self,
         job_id: UUID,
-        service: TranscriptionService = Provide(),
+        transcription_service: TranscriptionService,
     ) -> JobResponse:
         """Retry a failed job."""
-        job = await service.retry_job(job_id)
+        job = await transcription_service.retry_job(job_id)
         if not job:
             raise NotFoundException(detail=f"Job {job_id} not found")
 
@@ -137,12 +138,12 @@ class HealthController(Controller):
     @get("/ready")
     async def readiness_check(
         self,
-        service: TranscriptionService = Provide(),
+        transcription_service: TranscriptionService,
     ) -> dict[str, str | bool]:
         """Readiness check including dependencies."""
         try:
             # Check if transcription backends are available
-            backends_available = await service.check_backends()
+            backends_available = await transcription_service.check_backends()
             
             return {
                 "status": "ready" if backends_available else "not_ready",
@@ -160,13 +161,13 @@ class HealthController(Controller):
 async def job_updates_websocket(
     socket: WebSocket,
     job_id: UUID,
-    service: TranscriptionService = Provide(),
+    transcription_service: TranscriptionService,
 ) -> None:
     """WebSocket endpoint for real-time job updates."""
     await socket.accept()
     
     try:
-        async for update in service.stream_job_updates(job_id):
+        async for update in transcription_service.stream_job_updates(job_id):
             await socket.send_json({
                 "type": "status_update",
                 "job_id": str(job_id),

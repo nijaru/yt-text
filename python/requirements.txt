@@ -1,3 +1,0 @@
-faster-whisper
-torch
-yt_dlp

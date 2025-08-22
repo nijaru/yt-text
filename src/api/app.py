@@ -119,16 +119,13 @@ def create_app() -> Litestar:
     ]
     
     # Response cache configuration (optional)
-    cache_config = ResponseCacheConfig(
-        default_expiration=60,  # 1 minute default
-        exclude_paths=["/api/jobs/*", "/ws/*"],
-    )
+    cache_config = None  # Disabled for now
     
     # Create application
     app = Litestar(
         route_handlers=transcription_router,
-        lifespan=[lifespan],
         dependencies=dependencies,
+        lifespan=[lifespan],
         exception_handlers={
             HTTPException: handle_app_exception,
         },
@@ -136,7 +133,6 @@ def create_app() -> Litestar:
         openapi_config=openapi_config,
         static_files_config=static_files_config,
         logging_config=logging_config,
-        response_cache_config=cache_config if settings.cache_enabled else None,
         debug=settings.debug,
     )
     

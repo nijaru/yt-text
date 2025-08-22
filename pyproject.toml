@@ -8,27 +8,24 @@ dependencies = [
     # Web framework
     "litestar[standard]>=2.13.0",
     "uvicorn[standard]>=0.32.0",
-    
     # Database
     "sqlmodel>=0.0.22",
     "aiosqlite>=0.20.0",
     "alembic>=1.13.0",
-    
     # Transcription
-    "openai-whisper>=20231117",  # Fallback/reference
+    "openai-whisper>=20231117", # Fallback/reference
     "yt-dlp>=2024.11.18",
-    
     # Caching
     "diskcache>=5.6.0",
-    
     # Utils
     "pydantic>=2.10.0",
     "pydantic-settings>=2.6.0",
     "python-multipart>=0.0.18",
     "httpx>=0.28.0",
-    
     # Development platforms (optional)
     # mlx-whisper>=0.5.0  # For M3 Max dev (install separately)
+    "mlx-whisper>=0.4.2",
+    "greenlet>=3.2.4",
 ]
 
 [project.optional-dependencies]
@@ -58,11 +55,7 @@ build-backend = "hatchling.build"
 packages = ["src"]
 
 [project.scripts]
-dev = "uvicorn src.api.app:app --reload --host 0.0.0.0 --port 8000"
-prod = "uvicorn src.api.app:app --host 0.0.0.0 --port 8000 --workers 1"
-test = "pytest tests/ -v"
-migrate = "alembic upgrade head"
-transcribe = "python src/cli.py"
+transcribe = "src.cli:main"
 
 [tool.ruff]
 target-version = "py312"
