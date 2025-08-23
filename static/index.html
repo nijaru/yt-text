@@ -1,187 +1,587 @@
-<!doctype html>
-<html lang="en">
-    <head>
-        <meta charset="UTF-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>yt-text</title>
-        <link
-            href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css"
-            rel="stylesheet"
-        />
-        <link
-            rel="stylesheet"
-            href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css"
-        />
-
-        <style>
-            .ad-container {
-                min-height: 100px;
-                background-color: rgba(255, 255, 255, 0.1);
-                margin: 1rem 0;
-                display: flex;
-                justify-content: center;
-                align-items: center;
-                overflow: hidden;
-            }
-
-            .ad-container:empty::before {
-                content: "Advertisement";
-                color: #666;
-                font-size: 0.8rem;
-            }
-        </style>
-
-        <script
-            async
-            src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-4082264246695554"
-            crossorigin="anonymous"
-        ></script>
-    </head>
-    <body class="bg-gray-900 text-gray-100 flex flex-col min-h-screen">
-        <header class="bg-gray-800 text-white p-4">
-            <div class="container mx-auto">
-                <h1 class="text-3xl font-bold">yt-text</h1>
-                <p class="text-lg">Transcribe videos easily</p>
-            </div>
-        </header>
-
-        <!-- <div class="ad-container">
-            <ins
-                class="adsbygoogle"
-                style="display: block"
-                data-ad-client="ca-pub-4082264246695554"
-                data-ad-slot="YOUR_AD_SLOT_ID"
-                data-ad-format="auto"
-                data-full-width-responsive="true"
-            ></ins>
-            <script>
-                (adsbygoogle = window.adsbygoogle || []).push({});
-            </script>
-        </div> -->
-
-        <main
-            class="container mx-auto p-4 flex-grow flex items-center justify-center"
-        >
-            <div class="bg-gray-800 shadow-md rounded p-6 w-full max-w-2xl">
-                <h2 class="text-2xl font-bold mb-4">Transcribe a Video</h2>
-
-                <!-- Form -->
-                <form id="transcriptionForm" class="mb-4">
-                    <label for="url" class="block text-lg font-medium mb-2"
-                        >Enter a YouTube URL:</label
-                    >
-                    <input
-                        type="url"
-                        id="url"
-                        name="url"
-                        class="w-full p-2 border border-gray-600 rounded mb-4 bg-gray-700 text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                        placeholder="https://www.youtube.com/watch?v=..."
-                        required
-                    />
-                    <div class="flex space-x-4">
-                        <button
-                            type="submit"
-                            class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50 disabled:opacity-50"
-                        >
-                            <span class="flex items-center">
-                                <i class="fas fa-paper-plane mr-2"></i>
-                                Submit
-                            </span>
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>yt-text | AI-Powered Video Transcription</title>
+    <meta name="description" content="Transform any video into accurate text transcriptions using state-of-the-art AI models">
+    
+    <!-- Modern CSS Framework - Using Tailwind via CDN for now -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Alpine.js for reactive components -->
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    
+    <!-- Modern Icons -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lucide-static@0.263.0/font/lucide.css">
+    
+    <!-- Custom styles for animations and glassmorphism -->
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+        
+        * {
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+        }
+        
+        /* Gradient animations */
+        @keyframes gradient {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+        
+        .animated-gradient {
+            background: linear-gradient(-45deg, #667eea, #764ba2, #f093fb, #f5576c);
+            background-size: 400% 400%;
+            animation: gradient 15s ease infinite;
+        }
+        
+        /* Glassmorphism effects */
+        .glass {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .glass-dark {
+            background: rgba(0, 0, 0, 0.3);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        
+        /* Smooth transitions */
+        .smooth-transition {
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        
+        /* Loading spinner */
+        .loader {
+            border-top-color: #667eea;
+            -webkit-animation: spinner 1.5s linear infinite;
+            animation: spinner 1.5s linear infinite;
+        }
+        
+        @-webkit-keyframes spinner {
+            0% { -webkit-transform: rotate(0deg); }
+            100% { -webkit-transform: rotate(360deg); }
+        }
+        
+        @keyframes spinner {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        /* Progress bar animation */
+        @keyframes progress {
+            0% { width: 0%; }
+            100% { width: var(--progress, 0%); }
+        }
+        
+        .progress-bar {
+            animation: progress 0.5s ease-out forwards;
+        }
+        
+        /* Custom scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        
+        ::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.1);
+        }
+        
+        ::-webkit-scrollbar-thumb {
+            background: rgba(102, 126, 234, 0.5);
+            border-radius: 4px;
+        }
+        
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(102, 126, 234, 0.8);
+        }
+    </style>
+</head>
+<body class="h-full bg-gray-950">
+    <!-- Background gradient -->
+    <div class="fixed inset-0 animated-gradient opacity-20"></div>
+    
+    <!-- Main container -->
+    <div class="relative min-h-full flex flex-col" x-data="transcriptionApp()">
+        
+        <!-- Navigation -->
+        <nav class="glass-dark border-b border-white/5">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="flex items-center justify-between h-16">
+                    <div class="flex items-center space-x-3">
+                        <div class="w-10 h-10 rounded-lg animated-gradient flex items-center justify-center">
+                            <i class="lucide-file-audio text-white text-xl"></i>
+                        </div>
+                        <div>
+                            <h1 class="text-xl font-bold text-white">yt-text</h1>
+                            <p class="text-xs text-gray-400">AI Transcription</p>
+                        </div>
+                    </div>
+                    
+                    <div class="flex items-center space-x-6">
+                        <button @click="showDocs = true" class="text-gray-300 hover:text-white smooth-transition">
+                            <i class="lucide-book-open"></i>
+                        </button>
+                        <a href="https://github.com/nijaru/yt-text" target="_blank" 
+                           class="text-gray-300 hover:text-white smooth-transition">
+                            <i class="lucide-github"></i>
+                        </a>
+                        <button @click="toggleTheme()" class="text-gray-300 hover:text-white smooth-transition">
+                            <i class="lucide-moon"></i>
                         </button>
                     </div>
-                </form>
-
-                <!-- Error Message -->
-                <div id="error-message" class="text-red-500 mt-4"></div>
-
-                <!-- Status -->
-                <div
-                    id="transcriptionStatus"
-                    class="hidden mt-4 bg-gray-700 p-4 rounded-md"
-                >
-                    <div class="flex items-center">
-                        <div
-                            class="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500 mr-2"
-                        ></div>
-                        <span>Starting transcription...</span>
+                </div>
+            </div>
+        </nav>
+        
+        <!-- Main content -->
+        <main class="flex-1 flex items-center justify-center p-4">
+            <div class="w-full max-w-4xl">
+                
+                <!-- Hero section -->
+                <div class="text-center mb-12">
+                    <h2 class="text-5xl font-bold text-white mb-4">
+                        Transform Videos into
+                        <span class="text-transparent bg-clip-text animated-gradient">Accurate Text</span>
+                    </h2>
+                    <p class="text-xl text-gray-400 max-w-2xl mx-auto">
+                        Powered by state-of-the-art AI models including Whisper, MLX, and more.
+                        Just paste a URL and get instant transcriptions.
+                    </p>
+                </div>
+                
+                <!-- Main card -->
+                <div class="glass rounded-2xl p-8 shadow-2xl">
+                    
+                    <!-- URL Input Form -->
+                    <form @submit.prevent="submitTranscription" class="space-y-6">
+                        
+                        <!-- URL Input -->
+                        <div>
+                            <label class="block text-sm font-medium text-gray-300 mb-2">
+                                Video URL
+                            </label>
+                            <div class="relative">
+                                <input 
+                                    type="url"
+                                    x-model="url"
+                                    placeholder="https://www.youtube.com/watch?v=..."
+                                    required
+                                    class="w-full px-4 py-3 pl-12 bg-gray-900/50 border border-gray-700 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent smooth-transition"
+                                    :disabled="loading"
+                                >
+                                <i class="lucide-link absolute left-4 top-3.5 text-gray-500"></i>
+                            </div>
+                            <p class="mt-2 text-xs text-gray-500">
+                                Supports YouTube, Vimeo, Twitter, TikTok, and 1000+ other sites
+                            </p>
+                        </div>
+                        
+                        <!-- Model Selection -->
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-300 mb-2">
+                                    AI Model
+                                </label>
+                                <select 
+                                    x-model="model"
+                                    class="w-full px-4 py-3 bg-gray-900/50 border border-gray-700 rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent smooth-transition"
+                                    :disabled="loading"
+                                >
+                                    <option value="tiny">Tiny (Fastest)</option>
+                                    <option value="base" selected>Base (Balanced)</option>
+                                    <option value="small">Small (Better)</option>
+                                    <option value="medium">Medium (Accurate)</option>
+                                    <option value="large">Large (Most Accurate)</option>
+                                </select>
+                            </div>
+                            
+                            <div>
+                                <label class="block text-sm font-medium text-gray-300 mb-2">
+                                    Language
+                                </label>
+                                <select 
+                                    x-model="language"
+                                    class="w-full px-4 py-3 bg-gray-900/50 border border-gray-700 rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent smooth-transition"
+                                    :disabled="loading"
+                                >
+                                    <option value="">Auto-detect</option>
+                                    <option value="en">English</option>
+                                    <option value="es">Spanish</option>
+                                    <option value="fr">French</option>
+                                    <option value="de">German</option>
+                                    <option value="it">Italian</option>
+                                    <option value="pt">Portuguese</option>
+                                    <option value="ru">Russian</option>
+                                    <option value="ja">Japanese</option>
+                                    <option value="ko">Korean</option>
+                                    <option value="zh">Chinese</option>
+                                </select>
+                            </div>
+                        </div>
+                        
+                        <!-- Submit Button -->
+                        <button 
+                            type="submit"
+                            class="w-full py-4 px-6 text-white font-semibold rounded-xl animated-gradient hover:shadow-lg smooth-transition disabled:opacity-50 disabled:cursor-not-allowed"
+                            :disabled="loading"
+                        >
+                            <span x-show="!loading" class="flex items-center justify-center space-x-2">
+                                <i class="lucide-wand-2"></i>
+                                <span>Start Transcription</span>
+                            </span>
+                            <span x-show="loading" class="flex items-center justify-center space-x-2">
+                                <div class="loader ease-linear rounded-full border-4 border-t-4 border-gray-200 h-5 w-5"></div>
+                                <span>Processing...</span>
+                            </span>
+                        </button>
+                    </form>
+                    
+                    <!-- Progress Section -->
+                    <div x-show="jobId && !result" class="mt-8" x-cloak>
+                        <div class="glass-dark rounded-xl p-6">
+                            <div class="flex items-center justify-between mb-4">
+                                <h3 class="text-lg font-semibold text-white">Processing</h3>
+                                <span class="text-sm text-gray-400">Job ID: <span x-text="jobId?.slice(0, 8)"></span></span>
+                            </div>
+                            
+                            <!-- Progress Bar -->
+                            <div class="w-full bg-gray-800 rounded-full h-3 overflow-hidden">
+                                <div class="h-full animated-gradient progress-bar" 
+                                     :style="`--progress: ${progress}%`"></div>
+                            </div>
+                            
+                            <div class="mt-4 flex items-center justify-between text-sm">
+                                <span class="text-gray-400" x-text="status"></span>
+                                <span class="text-white font-medium" x-text="`${progress}%`"></span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Results Section -->
+                    <div x-show="result" class="mt-8" x-cloak>
+                        <div class="glass-dark rounded-xl p-6">
+                            <div class="flex items-center justify-between mb-4">
+                                <h3 class="text-lg font-semibold text-white">Transcription Complete</h3>
+                                <button @click="copyToClipboard()" 
+                                        class="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg smooth-transition flex items-center space-x-2">
+                                    <i class="lucide-copy text-sm"></i>
+                                    <span>Copy</span>
+                                </button>
+                            </div>
+                            
+                            <!-- Metadata -->
+                            <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                                <div class="text-center">
+                                    <p class="text-gray-400 text-xs">Duration</p>
+                                    <p class="text-white font-semibold" x-text="formatDuration(result?.duration)"></p>
+                                </div>
+                                <div class="text-center">
+                                    <p class="text-gray-400 text-xs">Words</p>
+                                    <p class="text-white font-semibold" x-text="result?.word_count"></p>
+                                </div>
+                                <div class="text-center">
+                                    <p class="text-gray-400 text-xs">Language</p>
+                                    <p class="text-white font-semibold" x-text="result?.language?.toUpperCase()"></p>
+                                </div>
+                                <div class="text-center">
+                                    <p class="text-gray-400 text-xs">Model</p>
+                                    <p class="text-white font-semibold" x-text="result?.model_used"></p>
+                                </div>
+                            </div>
+                            
+                            <!-- Transcription Text -->
+                            <div class="bg-gray-900/50 rounded-lg p-4 max-h-96 overflow-y-auto">
+                                <p class="text-gray-200 whitespace-pre-wrap" x-text="result?.text"></p>
+                            </div>
+                            
+                            <!-- Actions -->
+                            <div class="mt-4 flex space-x-3">
+                                <button @click="downloadText()" 
+                                        class="flex-1 px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg smooth-transition">
+                                    <i class="lucide-download mr-2"></i>
+                                    Download TXT
+                                </button>
+                                <button @click="reset()" 
+                                        class="flex-1 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg smooth-transition">
+                                    <i class="lucide-refresh-cw mr-2"></i>
+                                    New Transcription
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Error Section -->
+                    <div x-show="error" class="mt-8" x-cloak>
+                        <div class="bg-red-900/20 border border-red-500/50 rounded-xl p-6">
+                            <div class="flex items-start space-x-3">
+                                <i class="lucide-alert-circle text-red-500 mt-1"></i>
+                                <div class="flex-1">
+                                    <h3 class="text-red-400 font-semibold mb-1">Error</h3>
+                                    <p class="text-gray-300" x-text="error"></p>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
-
-                <!-- Action Buttons -->
-                <div class="flex space-x-4 mt-4">
-                    <button
-                        id="copyButton"
-                        class="hidden bg-yellow-500 text-white px-4 py-2 rounded hover:bg-yellow-600 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-yellow-500 focus:ring-opacity-50"
-                    >
-                        <span class="flex items-center">
-                            <i class="fas fa-copy mr-2"></i>
-                            Copy to Clipboard
-                        </span>
-                    </button>
-                    <button
-                        id="downloadButton"
-                        class="hidden bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-50"
-                    >
-                        <span class="flex items-center">
-                            <i class="fas fa-download mr-2"></i>
-                            Download as Text File
-                        </span>
-                    </button>
+                
+                <!-- Features Grid -->
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mt-12">
+                    <div class="glass rounded-xl p-6 text-center">
+                        <div class="w-12 h-12 mx-auto mb-4 rounded-lg bg-purple-600/20 flex items-center justify-center">
+                            <i class="lucide-zap text-purple-400"></i>
+                        </div>
+                        <h3 class="text-white font-semibold mb-2">Lightning Fast</h3>
+                        <p class="text-gray-400 text-sm">Optimized for speed with multiple backend options</p>
+                    </div>
+                    
+                    <div class="glass rounded-xl p-6 text-center">
+                        <div class="w-12 h-12 mx-auto mb-4 rounded-lg bg-blue-600/20 flex items-center justify-center">
+                            <i class="lucide-shield-check text-blue-400"></i>
+                        </div>
+                        <h3 class="text-white font-semibold mb-2">Privacy First</h3>
+                        <p class="text-gray-400 text-sm">Your data is processed locally and never stored</p>
+                    </div>
+                    
+                    <div class="glass rounded-xl p-6 text-center">
+                        <div class="w-12 h-12 mx-auto mb-4 rounded-lg bg-green-600/20 flex items-center justify-center">
+                            <i class="lucide-sparkles text-green-400"></i>
+                        </div>
+                        <h3 class="text-white font-semibold mb-2">AI Powered</h3>
+                        <p class="text-gray-400 text-sm">State-of-the-art models for accurate transcriptions</p>
+                    </div>
                 </div>
-
-                <!-- Result -->
-                <h3
-                    id="transcriptionHeader"
-                    class="text-xl font-bold mt-6 mb-4 hidden"
-                >
-                    Transcription:
-                </h3>
-                <div
-                    id="response"
-                    class="mt-4 bg-gray-700 rounded-md overflow-auto"
-                ></div>
             </div>
         </main>
-
-        <!-- <div class="ad-container">
-            <ins
-                class="adsbygoogle"
-                style="display: block"
-                data-ad-client="ca-pub-4082264246695554"
-                data-ad-slot="YOUR_AD_SLOT_ID"
-                data-ad-format="auto"
-                data-full-width-responsive="true"
-            ></ins>
-            <script>
-                (adsbygoogle = window.adsbygoogle || []).push({});
-            </script>
-        </div> -->
-
-        <footer class="bg-gray-800 text-white p-4 mt-8">
-            <div
-                class="container mx-auto text-center flex flex-col items-center"
-            >
-                <p>&copy; 2024 yt-text. All rights reserved.</p>
-                <p>
-                    This project is licensed under the
-                    <a
-                        href="https://www.gnu.org/licenses/agpl-3.0.html"
-                        class="text-blue-400 underline"
-                        >AGPL-3.0</a
-                    >.
-                </p>
-                <p>
-                    <a
-                        href="https://github.com/nijaru/yt-text"
-                        class="text-blue-400 underline flex items-center"
-                    >
-                        <i class="fab fa-github mr-2"></i> View on GitHub
-                    </a>
-                </p>
+        
+        <!-- Footer -->
+        <footer class="glass-dark border-t border-white/5 py-6 mt-12">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="flex flex-col md:flex-row items-center justify-between">
+                    <p class="text-gray-400 text-sm">
+                        © 2024 yt-text. Licensed under AGPL-3.0
+                    </p>
+                    <div class="flex items-center space-x-6 mt-4 md:mt-0">
+                        <a href="/docs" class="text-gray-400 hover:text-white text-sm smooth-transition">API Docs</a>
+                        <a href="https://github.com/nijaru/yt-text" class="text-gray-400 hover:text-white text-sm smooth-transition">GitHub</a>
+                        <span class="text-gray-400 text-sm">v2.0.0</span>
+                    </div>
+                </div>
             </div>
         </footer>
-
-        <script type="module" src="/static/formHandler.js"></script>
-        <script type="module" src="/static/utils.js"></script>
-    </body>
+    </div>
+    
+    <!-- Application JavaScript -->
+    <script>
+        function transcriptionApp() {
+            return {
+                // Form data
+                url: '',
+                model: 'base',
+                language: '',
+                
+                // State
+                loading: false,
+                jobId: null,
+                status: 'Initializing...',
+                progress: 0,
+                result: null,
+                error: null,
+                showDocs: false,
+                
+                // WebSocket
+                ws: null,
+                
+                // Methods
+                async submitTranscription() {
+                    this.loading = true;
+                    this.error = null;
+                    this.result = null;
+                    this.progress = 0;
+                    
+                    try {
+                        const response = await fetch('/api/transcribe', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify({
+                                url: this.url,
+                                model: this.model,
+                                language: this.language || null,
+                            }),
+                        });
+                        
+                        if (!response.ok) {
+                            const error = await response.json();
+                            throw new Error(error.detail || 'Failed to start transcription');
+                        }
+                        
+                        const data = await response.json();
+                        this.jobId = data.job_id;
+                        this.status = data.status;
+                        
+                        // Start polling or WebSocket connection
+                        this.connectWebSocket();
+                        
+                    } catch (err) {
+                        this.error = err.message;
+                        this.loading = false;
+                    }
+                },
+                
+                connectWebSocket() {
+                    if (!this.jobId) return;
+                    
+                    // Use WebSocket for real-time updates
+                    const wsUrl = `ws://localhost:8000/ws/jobs/${this.jobId}`;
+                    this.ws = new WebSocket(wsUrl);
+                    
+                    this.ws.onmessage = (event) => {
+                        const data = JSON.parse(event.data);
+                        
+                        if (data.type === 'status_update') {
+                            this.status = data.status;
+                            this.progress = data.progress || 0;
+                        } else if (data.type === 'result') {
+                            this.fetchResult();
+                        } else if (data.type === 'error') {
+                            this.error = data.error || 'Transcription failed';
+                            this.loading = false;
+                            this.ws.close();
+                        }
+                    };
+                    
+                    this.ws.onerror = () => {
+                        // Fallback to polling if WebSocket fails
+                        this.pollStatus();
+                    };
+                    
+                    this.ws.onclose = () => {
+                        this.ws = null;
+                    };
+                },
+                
+                async pollStatus() {
+                    if (!this.jobId) return;
+                    
+                    const poll = async () => {
+                        try {
+                            const response = await fetch(`/api/jobs/${this.jobId}`);
+                            const data = await response.json();
+                            
+                            this.status = data.status;
+                            this.progress = data.progress || 0;
+                            
+                            if (data.status === 'completed') {
+                                await this.fetchResult();
+                            } else if (data.status === 'failed') {
+                                this.error = data.error || 'Transcription failed';
+                                this.loading = false;
+                            } else {
+                                // Continue polling
+                                setTimeout(poll, 2000);
+                            }
+                        } catch (err) {
+                            this.error = 'Failed to check status';
+                            this.loading = false;
+                        }
+                    };
+                    
+                    poll();
+                },
+                
+                async fetchResult() {
+                    try {
+                        const response = await fetch(`/api/jobs/${this.jobId}/result`);
+                        if (!response.ok) {
+                            throw new Error('Failed to fetch result');
+                        }
+                        
+                        this.result = await response.json();
+                        this.loading = false;
+                        this.progress = 100;
+                        this.status = 'Complete';
+                        
+                        if (this.ws) {
+                            this.ws.close();
+                        }
+                    } catch (err) {
+                        this.error = err.message;
+                        this.loading = false;
+                    }
+                },
+                
+                copyToClipboard() {
+                    if (this.result?.text) {
+                        navigator.clipboard.writeText(this.result.text);
+                        // Show toast notification
+                        this.showToast('Copied to clipboard!');
+                    }
+                },
+                
+                downloadText() {
+                    if (this.result?.text) {
+                        const blob = new Blob([this.result.text], { type: 'text/plain' });
+                        const url = window.URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `transcription-${this.jobId?.slice(0, 8)}.txt`;
+                        a.click();
+                        window.URL.revokeObjectURL(url);
+                    }
+                },
+                
+                reset() {
+                    this.url = '';
+                    this.jobId = null;
+                    this.status = 'Initializing...';
+                    this.progress = 0;
+                    this.result = null;
+                    this.error = null;
+                    this.loading = false;
+                    
+                    if (this.ws) {
+                        this.ws.close();
+                    }
+                },
+                
+                formatDuration(seconds) {
+                    if (!seconds) return '0:00';
+                    const hours = Math.floor(seconds / 3600);
+                    const minutes = Math.floor((seconds % 3600) / 60);
+                    const secs = seconds % 60;
+                    
+                    if (hours > 0) {
+                        return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+                    }
+                    return `${minutes}:${secs.toString().padStart(2, '0')}`;
+                },
+                
+                toggleTheme() {
+                    // Implement theme toggle if needed
+                    console.log('Theme toggle not implemented yet');
+                },
+                
+                showToast(message) {
+                    // Simple toast implementation
+                    const toast = document.createElement('div');
+                    toast.className = 'fixed bottom-4 right-4 px-6 py-3 bg-green-600 text-white rounded-lg shadow-lg z-50';
+                    toast.textContent = message;
+                    document.body.appendChild(toast);
+                    
+                    setTimeout(() => {
+                        toast.remove();
+                    }, 3000);
+                }
+            };
+        }
+    </script>
+</body>
 </html>
