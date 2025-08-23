@@ -15,10 +15,7 @@ from src.services.transcription import TranscriptionService
 async def provide_db_session(state: State) -> AsyncIterator[AsyncSession]:
     """Provide database session."""
     async with state.db_session() as session:
-        try:
-            yield session
-        finally:
-            await session.close()
+        yield session
 
 
 async def provide_download_service() -> DownloadService:

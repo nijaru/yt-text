@@ -36,12 +36,21 @@ logging_config = LoggingConfig(
 
 async def create_db_engine() -> AsyncEngine:
     """Create async database engine."""
+    connect_args = {}
+    if "sqlite" in settings.database_url:
+        # SQLite specific settings for better concurrency
+        connect_args = {
+            "check_same_thread": False,
+            "timeout": 20,  # Increase timeout for busy database
+        }
+    
     return create_async_engine(
         settings.database_url,
         echo=settings.debug,
         pool_size=settings.database_pool_size,
         pool_timeout=settings.database_pool_timeout,
-        connect_args={"check_same_thread": False} if "sqlite" in settings.database_url else {},
+        connect_args=connect_args,
+        isolation_level="READ UNCOMMITTED" if "sqlite" in settings.database_url else "READ COMMITTED",
     )
 
 
@@ -111,10 +120,17 @@ def create_app() -> Litestar:
     
     # Static files configuration
     static_files_config = [
+        # Serve static assets like CSS, JS, favicon
+        StaticFilesConfig(
+            directories=[settings.static_dir / "dist" / "assets"],
+            path="/assets",
+            html_mode=False,
+        ),
+        # Serve favicon and other root static files
         StaticFilesConfig(
             directories=[settings.static_dir],
-            path="/",
-            html_mode=True,
+            path="/static",
+            html_mode=False,
         ),
     ]
     

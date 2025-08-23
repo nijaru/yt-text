@@ -46,6 +46,18 @@ install:
 dev:
 	uv run litestar --app src.api.app:app run --reload --host 127.0.0.1 --port 8000
 
+# Frontend development server
+frontend-dev:
+	cd frontend && npm run dev
+
+# Build frontend for production
+frontend-build:
+	cd frontend && npm run build
+
+# Install frontend dependencies
+frontend-install:
+	cd frontend && npm install
+
 # Production server
 serve:
 	uv run litestar --app src.api.app:app run --host 0.0.0.0 --port 8000 --workers 4

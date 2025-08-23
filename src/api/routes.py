@@ -62,6 +62,7 @@ class TranscriptionController(Controller):
         return JobStatusResponse(
             job_id=job.id,
             status=job.status,
+            phase=job.phase,
             progress=job.progress,
             created_at=job.created_at,
             started_at=job.started_at,
@@ -164,14 +165,20 @@ async def job_updates_websocket(
     transcription_service: TranscriptionService,
 ) -> None:
     """WebSocket endpoint for real-time job updates."""
+    import logging
+    logger = logging.getLogger(__name__)
+    
     await socket.accept()
+    logger.info(f"WebSocket connected for job {job_id}")
     
     try:
         async for update in transcription_service.stream_job_updates(job_id):
+            logger.info(f"Sending update for job {job_id}: status={update.status}, phase={update.phase}, progress={update.progress}")
             await socket.send_json({
                 "type": "status_update",
                 "job_id": str(job_id),
                 "status": update.status,
+                "phase": update.phase,
                 "progress": update.progress,
             })
             
@@ -199,9 +206,40 @@ async def job_updates_websocket(
         await socket.close()
 
 
+@get("/", media_type="text/html")
+async def serve_spa_root() -> str:
+    """Serve SPA root."""
+    from src.core.config import settings
+    
+    index_path = settings.static_dir / "dist" / "index.html"
+    if index_path.exists():
+        return index_path.read_text()
+    else:
+        raise NotFoundException()
+
+
+@get("/{path:path}", media_type="text/html")
+async def serve_spa_fallback(path: str) -> str:
+    """Serve SPA for all unmatched routes."""
+    from src.core.config import settings
+    
+    # Skip API and WebSocket routes
+    if path.startswith(("api/", "ws/", "docs/", "health/", "assets/", "static/")):
+        raise NotFoundException()
+        
+    # Serve index.html for SPA routes
+    index_path = settings.static_dir / "dist" / "index.html"
+    if index_path.exists():
+        return index_path.read_text()
+    else:
+        raise NotFoundException()
+
+
 # Export router for main app
 transcription_router = [
     TranscriptionController,
     HealthController,
     job_updates_websocket,
+    serve_spa_root,
+    serve_spa_fallback,  # Must be last for fallback routing
 ]

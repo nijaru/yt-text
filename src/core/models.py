@@ -17,6 +17,16 @@ class JobStatus(StrEnum):
     FAILED = "failed"
 
 
+class JobPhase(StrEnum):
+    """Job processing phase."""
+    
+    QUEUED = "queued"
+    DOWNLOADING = "downloading"
+    TRANSCRIBING = "transcribing"
+    FINALIZING = "finalizing"
+    COMPLETE = "complete"
+
+
 class TranscriptionJob(SQLModel, table=True):
     """Transcription job model."""
 
@@ -25,6 +35,7 @@ class TranscriptionJob(SQLModel, table=True):
     id: UUID = Field(default_factory=uuid4, primary_key=True)
     url: str = Field(index=True)
     status: JobStatus = Field(default=JobStatus.PENDING, index=True)
+    phase: JobPhase = Field(default=JobPhase.QUEUED)
     
     # Request parameters
     model_requested: str = Field(default="base")
@@ -40,7 +51,7 @@ class TranscriptionJob(SQLModel, table=True):
     
     # Metadata
     error: Optional[str] = Field(default=None)
-    progress: int = Field(default=0)  # percentage
+    progress: int = Field(default=0)  # percentage within current phase
     processing_time_ms: Optional[int] = Field(default=None)
     ip_address: Optional[str] = Field(default=None)
     user_agent: Optional[str] = Field(default=None)
@@ -80,7 +91,8 @@ class JobStatusResponse(SQLModel):
 
     job_id: UUID
     status: JobStatus
-    progress: int
+    phase: JobPhase
+    progress: int  # Progress within current phase (0-100)
     created_at: datetime
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None

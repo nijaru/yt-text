@@ -6,11 +6,13 @@ from datetime import datetime
 from typing import AsyncIterator, Optional
 from uuid import UUID
 
+logger = logging.getLogger(__name__)
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.config import settings
-from src.core.models import JobStatus, TranscriptionJob
+from src.core.models import JobStatus, JobPhase, TranscriptionJob
 from src.lib.backends.base import TranscriptionBackend
 from src.lib.backends.factory import BackendFactory
 from src.services.cache import CacheService
@@ -87,7 +89,9 @@ class TranscriptionService:
 
         # Start background processing if requested
         if start_processing and len(self._running_jobs) < settings.max_concurrent_jobs:
-            task = asyncio.create_task(self._process_job(job.id))
+            # Pass the session factory to create a new session for background task
+            from src.api.app import app
+            task = asyncio.create_task(self._process_job_with_new_session(job.id, app.state.db_session))
             self._running_jobs[job.id] = task
         
         return job
@@ -117,7 +121,9 @@ class TranscriptionService:
 
         # Start processing if slot available
         if len(self._running_jobs) < settings.max_concurrent_jobs:
-            task = asyncio.create_task(self._process_job(job.id))
+            # Pass the session factory to create a new session for background task
+            from src.api.app import app
+            task = asyncio.create_task(self._process_job_with_new_session(job.id, app.state.db_session))
             self._running_jobs[job.id] = task
 
         return job
@@ -131,18 +137,49 @@ class TranscriptionService:
         self, job_id: UUID
     ) -> AsyncIterator[TranscriptionJob]:
         """Stream real-time job updates."""
+        # Import here to avoid circular dependency
+        from src.api.app import app
+        
+        # Use a new session for each query to see updates from other sessions
         while True:
-            job = await self.get_job(job_id)
-            if not job:
-                break
+            async with app.state.db_session() as session:
+                result = await session.execute(
+                    select(TranscriptionJob).where(TranscriptionJob.id == job_id)
+                )
+                job = result.scalar_one_or_none()
                 
-            yield job
-            
-            if job.status in [JobStatus.COMPLETED, JobStatus.FAILED]:
-                break
+                if not job:
+                    break
                 
+                yield job
+                
+                if job.status in [JobStatus.COMPLETED, JobStatus.FAILED]:
+                    break
+                    
             await asyncio.sleep(1)
 
+    async def _process_job_with_new_session(self, job_id: UUID, session_factory) -> None:
+        """Process a transcription job with a new database session."""
+        async with session_factory() as session:
+            # Create new service instances with the new session
+            download_service = DownloadService()
+            cache_service = CacheService()
+            backend_factory = BackendFactory()
+            await backend_factory.initialize()
+            
+            # Create a new service instance with its own session
+            service = TranscriptionService(
+                db_session=session,
+                download_service=download_service,
+                cache_service=cache_service,
+                backend_factory=backend_factory,
+            )
+            
+            # Store the session factory for progress updates
+            service._session_factory = session_factory
+            
+            await service._process_job(job_id)
+    
     async def _process_job(self, job_id: UUID) -> None:
         """Process a transcription job in the background."""
         try:
@@ -155,19 +192,24 @@ class TranscriptionService:
             # Update to processing
             job.status = JobStatus.PROCESSING
             job.started_at = start_time
-            job.progress = 5
+            job.phase = JobPhase.DOWNLOADING
+            job.progress = 0
             await self.db_session.commit()
 
             # Download audio
             try:
-                download_callback = self._create_progress_callback(job_id, 5, 0.3)
-                audio_info = await self.download_service.download_audio(
-                    job.url, progress_callback=download_callback
-                )
+                logger.info(f"Starting download for job {job_id}: {job.url}")
+                
+                # Simply download without progress tracking
+                audio_info = await self.download_service.download_audio(job.url)
+                logger.info(f"Download complete for job {job_id}: {audio_info}")
+                
+                # Update after download
                 job.title = audio_info.get("title")
                 job.duration = audio_info.get("duration")
-                job.progress = 35
+                job.progress = 100  # Download complete
                 await self.db_session.commit()
+                logger.info(f"Download phase complete for job {job_id}")
             except Exception as e:
                 await self._mark_job_failed(job_id, f"Download failed: {str(e)}")
                 return
@@ -180,21 +222,28 @@ class TranscriptionService:
 
             # Transcribe audio
             try:
-                transcribe_callback = self._create_progress_callback(job_id, 35, 0.6)
+                # Switch to transcription phase
+                job.phase = JobPhase.TRANSCRIBING
+                job.progress = 0
+                await self.db_session.commit()
+                logger.info(f"Starting transcription for job {job_id} with backend {backend.__class__.__name__}")
+                
+                # Simply transcribe without progress tracking
                 result = await backend.transcribe(
                     audio_info["audio_path"],
                     model=job.model_requested,
                     language=job.language,
-                    progress_callback=transcribe_callback,
                 )
+                logger.info(f"Transcription complete for job {job_id}")
                 
                 # Update job with results
                 job.text = result.text
                 job.model_used = result.model_used
                 job.detected_language = result.language
                 job.word_count = len(result.text.split())
-                job.progress = 95
+                job.progress = 100  # Transcription complete
                 await self.db_session.commit()
+                logger.info(f"Transcription phase complete for job {job_id}")
 
             except Exception as e:
                 await self._mark_job_failed(job_id, f"Transcription failed: {str(e)}")
@@ -214,14 +263,22 @@ class TranscriptionService:
                     },
                 )
 
+            # Finalize
+            job.phase = JobPhase.FINALIZING
+            job.progress = 0
+            await self.db_session.commit()
+            
             # Mark completed
             job.status = JobStatus.COMPLETED
+            job.phase = JobPhase.COMPLETE
             job.progress = 100
             job.completed_at = datetime.utcnow()
             job.processing_time_ms = int(
                 (job.completed_at - start_time).total_seconds() * 1000
             )
+            logger.info(f"Marking job {job_id} as completed with {job.word_count} words")
             await self.db_session.commit()
+            logger.info(f"Job {job_id} successfully marked as completed")
 
         except Exception as e:
             await self._mark_job_failed(job_id, f"Unexpected error: {str(e)}")
@@ -234,35 +291,6 @@ class TranscriptionService:
             if 'audio_info' in locals() and audio_info.get("audio_path"):
                 await self.download_service.cleanup_file(audio_info["audio_path"])
 
-    def _create_progress_callback(self, job_id: UUID, base_progress: int, scale: float) -> callable:
-        """Create a sync progress callback that schedules async updates."""
-        def sync_callback(progress: int) -> None:
-            final_progress = base_progress + int(progress * scale)
-            # Try to schedule the async update, but don't fail if no event loop
-            try:
-                loop = asyncio.get_running_loop()
-                loop.create_task(self._update_progress_async(job_id, final_progress))
-            except RuntimeError:
-                # No event loop running, skip progress update
-                logging.debug(f"Skipping progress update for job {job_id}: no event loop")
-        return sync_callback
-
-    async def _update_progress_async(self, job_id: UUID, progress: int) -> None:
-        """Update job progress asynchronously."""
-        try:
-            job = await self.get_job(job_id)
-            if job:
-                job.progress = min(progress, 100)
-                await self.db_session.commit()
-        except Exception as e:
-            logging.warning(f"Failed to update progress for job {job_id}: {e}")
-
-    async def _update_progress(self, job_id: UUID, progress: int) -> None:
-        """Update job progress."""
-        job = await self.get_job(job_id)
-        if job:
-            job.progress = min(progress, 100)
-            await self.db_session.commit()
 
     async def _mark_job_failed(self, job_id: UUID, error: str) -> None:
         """Mark job as failed with error message."""

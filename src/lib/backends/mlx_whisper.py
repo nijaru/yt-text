@@ -51,9 +51,6 @@ class MLXWhisperBackend(TranscriptionBackend):
         except ImportError:
             raise RuntimeError("MLX Whisper not available")
 
-        if progress_callback:
-            progress_callback(10)
-
         # Run in thread pool since MLX operations can be blocking
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(
@@ -82,9 +79,6 @@ class MLXWhisperBackend(TranscriptionBackend):
         """Run transcription synchronously."""
         import mlx_whisper
 
-        if progress_callback:
-            progress_callback(30)
-
         # Map model name to MLX community repository
         mlx_model = self._model_mapping.get(model, f"mlx-community/whisper-{model}")
 
@@ -98,9 +92,6 @@ class MLXWhisperBackend(TranscriptionBackend):
             path_or_hf_repo=mlx_model,
             **kwargs
         )
-
-        if progress_callback:
-            progress_callback(90)
 
         return result
 

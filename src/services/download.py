@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import logging
 from pathlib import Path
 from typing import Any, Callable, Optional
 from urllib.parse import urlparse
@@ -9,6 +10,8 @@ from urllib.parse import urlparse
 import yt_dlp
 
 from src.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 class DownloadService:
@@ -46,11 +49,10 @@ class DownloadService:
     ) -> dict[str, Any]:
         """Download audio from URL and return metadata."""
         
+        # Simplified progress hook - just log status
         def progress_hook(d: dict) -> None:
-            if progress_callback and d['status'] == 'downloading':
-                if 'total_bytes' in d and 'downloaded_bytes' in d:
-                    progress = int((d['downloaded_bytes'] / d['total_bytes']) * 100)
-                    progress_callback(progress)
+            if d['status'] == 'finished':
+                logger.debug(f"Download finished: {d.get('filename', 'unknown')}")
 
         # Configure yt-dlp options
         ydl_opts = {
@@ -69,7 +71,7 @@ class DownloadService:
             'no_warnings': True,
             'extractaudio': True,
             'audioformat': 'wav',
-            'progress_hooks': [progress_hook] if progress_callback else [],
+            'progress_hooks': [progress_hook],
         }
 
         # Add duration and file size limits
