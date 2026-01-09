@@ -1,15 +1,27 @@
 [project]
 name = "yt-text-local"
 version = "0.1.0"
-description = "Local transcription CLI using Parakeet MLX (Apple Silicon)"
+description = "Local transcription CLI using Parakeet (multi-backend)"
 requires-python = ">=3.12"
 dependencies = [
-    "parakeet-mlx>=0.2.0",
     "yt-dlp>=2024.11.18",
     "rich>=13.0.0",
 ]
 
 [project.optional-dependencies]
+# Apple Silicon (recommended for M1/M2/M3)
+mlx = [
+    "parakeet-mlx>=0.2.0",
+]
+# NVIDIA GPU
+nemo = [
+    "nemo_toolkit[asr]>=2.0.0",
+]
+# CPU fallback (slower but universal)
+onnx = [
+    "onnx-asr[cpu,hub]>=0.1.0",
+]
+# Development
 dev = [
     "ruff>=0.8.0",
 ]

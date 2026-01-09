@@ -2,15 +2,20 @@
 """
 yt-text Local CLI
 
-Transcribe videos locally using Parakeet MLX on Apple Silicon.
-For development and demonstration purposes.
+Transcribe videos locally using Parakeet.
+Automatically selects the best available backend:
+- Apple Silicon: parakeet-mlx
+- NVIDIA GPU: nemo_toolkit
+- CPU: onnx-asr (slower)
 
 Usage:
     uv run cli.py <url-or-file>
     uv run cli.py https://youtube.com/watch?v=...
     uv run cli.py ~/audio.mp3
+    uv run cli.py audio.wav --backend mlx
 """
 
+import platform
 import subprocess
 import sys
 import tempfile
@@ -24,9 +29,55 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 console = Console()
 
 
+def detect_backend() -> str:
+    """Detect the best available backend for this system."""
+    system = platform.system()
+    machine = platform.machine()
+
+    # Apple Silicon
+    if system == "Darwin" and machine == "arm64":
+        try:
+            import parakeet_mlx  # noqa: F401
+
+            return "mlx"
+        except ImportError:
+            pass
+
+    # NVIDIA GPU
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            try:
+                import nemo.collections.asr  # noqa: F401
+
+                return "nemo"
+            except ImportError:
+                pass
+    except ImportError:
+        pass
+
+    # CPU fallback via ONNX
+    try:
+        import onnx_asr  # noqa: F401
+
+        return "onnx"
+    except ImportError:
+        pass
+
+    # Check what's actually installed and give helpful error
+    console.print("[red]No transcription backend available.[/]\n")
+    console.print("Install one of:")
+    if system == "Darwin" and machine == "arm64":
+        console.print("  [cyan]uv add parakeet-mlx[/]  (recommended for Apple Silicon)")
+    console.print("  [cyan]uv add nemo_toolkit[asr][/]  (for NVIDIA GPU)")
+    console.print("  [cyan]uv add onnx-asr[cpu,hub][/]  (CPU, slower)")
+    sys.exit(1)
+
+
 def download_audio(url: str, output_dir: Path) -> Path:
     """Download audio from URL using yt-dlp."""
-    output_path = output_dir / "audio.wav"
+    output_template = str(output_dir / "audio.%(ext)s")
 
     result = subprocess.run(
         [
@@ -39,7 +90,7 @@ def download_audio(url: str, output_dir: Path) -> Path:
             "--postprocessor-args",
             "ffmpeg:-ar 16000 -ac 1",
             "-o",
-            str(output_path.with_suffix(".%(ext)s")),
+            output_template,
             url,
         ],
         capture_output=True,
@@ -49,7 +100,7 @@ def download_audio(url: str, output_dir: Path) -> Path:
     if result.returncode != 0:
         raise RuntimeError(f"yt-dlp failed: {result.stderr}")
 
-    # Find the actual output file
+    # Find the output file
     wav_files = list(output_dir.glob("*.wav"))
     if not wav_files:
         raise RuntimeError("No audio file produced")
@@ -57,21 +108,71 @@ def download_audio(url: str, output_dir: Path) -> Path:
     return wav_files[0]
 
 
-def transcribe_file(
-    audio_path: Path, model_name: str = "mlx-community/parakeet-tdt-0.6b-v3"
-) -> dict:
-    """Transcribe audio file using Parakeet MLX."""
+def convert_to_wav(input_path: Path, output_path: Path) -> None:
+    """Convert audio to 16kHz mono WAV using ffmpeg."""
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-y",
+            "-i",
+            str(input_path),
+            "-ar",
+            "16000",
+            "-ac",
+            "1",
+            str(output_path),
+        ],
+        capture_output=True,
+        check=True,
+    )
+
+
+def transcribe_mlx(audio_path: Path) -> dict:
+    """Transcribe using parakeet-mlx (Apple Silicon)."""
     from parakeet_mlx import from_pretrained
 
-    model = from_pretrained(model_name)
+    model = from_pretrained("mlx-community/parakeet-tdt-0.6b-v3")
     result = model.transcribe(str(audio_path))
 
-    return {
-        "text": result.text,
-        "sentences": [{"text": s.text, "start": s.start, "end": s.end} for s in result.sentences]
-        if hasattr(result, "sentences")
-        else [],
-    }
+    sentences = []
+    if hasattr(result, "sentences"):
+        sentences = [{"text": s.text, "start": s.start, "end": s.end} for s in result.sentences]
+
+    return {"text": result.text, "sentences": sentences, "backend": "mlx"}
+
+
+def transcribe_nemo(audio_path: Path) -> dict:
+    """Transcribe using NeMo (NVIDIA GPU)."""
+    import nemo.collections.asr as nemo_asr
+
+    model = nemo_asr.models.ASRModel.from_pretrained("nvidia/parakeet-tdt-0.6b-v2")
+    result = model.transcribe([str(audio_path)])
+
+    text = result[0].text if hasattr(result[0], "text") else str(result[0])
+
+    return {"text": text, "sentences": [], "backend": "nemo"}
+
+
+def transcribe_onnx(audio_path: Path) -> dict:
+    """Transcribe using ONNX runtime (CPU)."""
+    import onnx_asr
+
+    model = onnx_asr.load_model("nemo-parakeet-tdt-0.6b-v2")
+    text = model.recognize(str(audio_path))
+
+    return {"text": text, "sentences": [], "backend": "onnx"}
+
+
+def transcribe_file(audio_path: Path, backend: str) -> dict:
+    """Transcribe audio file using the specified backend."""
+    if backend == "mlx":
+        return transcribe_mlx(audio_path)
+    elif backend == "nemo":
+        return transcribe_nemo(audio_path)
+    elif backend == "onnx":
+        return transcribe_onnx(audio_path)
+    else:
+        raise ValueError(f"Unknown backend: {backend}")
 
 
 def format_duration(seconds: float) -> str:
@@ -82,15 +183,37 @@ def format_duration(seconds: float) -> str:
 
 
 def main():
-    if len(sys.argv) < 2:
+    # Parse arguments
+    args = sys.argv[1:]
+
+    if not args or args[0] in ("-h", "--help"):
         console.print("[bold]yt-text[/] - Local video transcription\n")
-        console.print("Usage: uv run cli.py <url-or-file>")
-        console.print("\nExamples:")
+        console.print("Usage: uv run cli.py <url-or-file> [--backend mlx|nemo|onnx]\n")
+        console.print("Examples:")
         console.print("  uv run cli.py https://youtube.com/watch?v=...")
         console.print("  uv run cli.py ~/Downloads/podcast.mp3")
-        sys.exit(1)
+        console.print("  uv run cli.py audio.wav --backend nemo")
+        console.print("\nBackends:")
+        console.print("  mlx   - Apple Silicon (parakeet-mlx)")
+        console.print("  nemo  - NVIDIA GPU (nemo_toolkit)")
+        console.print("  onnx  - CPU fallback (onnx-asr)")
+        sys.exit(0)
 
-    input_path = sys.argv[1]
+    input_path = args[0]
+    backend = None
+
+    # Parse --backend flag
+    if "--backend" in args:
+        idx = args.index("--backend")
+        if idx + 1 < len(args):
+            backend = args[idx + 1]
+
+    # Auto-detect backend if not specified
+    if backend is None:
+        backend = detect_backend()
+
+    console.print(f"\n[dim]Backend:[/] {backend}")
+
     start_time = time.time()
 
     # Check if input is a file or URL
@@ -102,44 +225,31 @@ def main():
         TextColumn("[progress.description]{task.description}"),
         console=console,
     ) as progress:
-        if is_file:
-            # Direct file transcription
-            console.print(f"\n[dim]File:[/] {path.name}")
-            audio_path = path
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir_path = Path(tmpdir)
 
-            # Convert to WAV if needed
-            if path.suffix.lower() != ".wav":
-                task = progress.add_task("Converting to WAV...", total=None)
-                with tempfile.TemporaryDirectory() as tmpdir:
-                    wav_path = Path(tmpdir) / "audio.wav"
-                    subprocess.run(
-                        ["ffmpeg", "-i", str(path), "-ar", "16000", "-ac", "1", str(wav_path)],
-                        capture_output=True,
-                        check=True,
-                    )
-                    progress.remove_task(task)
+            if is_file:
+                console.print(f"[dim]File:[/] {path.name}")
 
-                    task = progress.add_task("Transcribing with Parakeet...", total=None)
-                    result = transcribe_file(wav_path)
+                # Convert to WAV if needed
+                if path.suffix.lower() != ".wav":
+                    task = progress.add_task("Converting to WAV...", total=None)
+                    wav_path = tmpdir_path / "audio.wav"
+                    convert_to_wav(path, wav_path)
+                    audio_path = wav_path
                     progress.remove_task(task)
+                else:
+                    audio_path = path
             else:
-                task = progress.add_task("Transcribing with Parakeet...", total=None)
-                result = transcribe_file(audio_path)
-                progress.remove_task(task)
-        else:
-            # URL - need to download first
-            console.print(f"\n[dim]URL:[/] {input_path}")
-
-            with tempfile.TemporaryDirectory() as tmpdir:
-                tmpdir_path = Path(tmpdir)
+                console.print(f"[dim]URL:[/] {input_path}")
 
                 task = progress.add_task("Downloading audio...", total=None)
                 audio_path = download_audio(input_path, tmpdir_path)
                 progress.remove_task(task)
 
-                task = progress.add_task("Transcribing with Parakeet...", total=None)
-                result = transcribe_file(audio_path)
-                progress.remove_task(task)
+            task = progress.add_task(f"Transcribing with Parakeet ({backend})...", total=None)
+            result = transcribe_file(audio_path, backend)
+            progress.remove_task(task)
 
     elapsed = time.time() - start_time
     word_count = len(result["text"].split())
@@ -158,11 +268,12 @@ def main():
     console.print(f"\n[dim]Words:[/] {word_count}")
     console.print(f"[dim]Time:[/] {elapsed:.1f}s")
 
-    # Show timestamps if available
+    # Show timestamps if available (MLX only currently)
     if result.get("sentences"):
         console.print("\n[bold]Timestamps:[/]")
-        for s in result["sentences"][:5]:  # Show first 5
-            console.print(f"  [{format_duration(s['start'])}] {s['text'][:60]}...")
+        for s in result["sentences"][:5]:
+            text_preview = s["text"][:60] + "..." if len(s["text"]) > 60 else s["text"]
+            console.print(f"  [{format_duration(s['start'])}] {text_preview}")
         if len(result["sentences"]) > 5:
             console.print(f"  [dim]... and {len(result['sentences']) - 5} more[/]")
 

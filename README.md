@@ -54,11 +54,21 @@ yt-text/
 
 ## Local Development
 
-Run transcription locally on Apple Silicon (M1/M2/M3):
+The CLI auto-detects the best backend for your hardware:
 
 ```bash
 cd local
-uv sync
+
+# Apple Silicon (M1/M2/M3)
+uv sync --extra mlx
+uv run cli.py https://youtube.com/watch?v=...
+
+# NVIDIA GPU
+uv sync --extra nemo
+uv run cli.py https://youtube.com/watch?v=...
+
+# CPU (slower, but works anywhere)
+uv sync --extra onnx
 uv run cli.py https://youtube.com/watch?v=...
 ```
 
@@ -66,6 +76,7 @@ Or transcribe a local file:
 
 ```bash
 uv run cli.py ~/Downloads/podcast.mp3
+uv run cli.py audio.wav --backend nemo  # force specific backend
 ```
 
 ## API Development
