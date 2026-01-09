@@ -1,6 +1,6 @@
 # yt-text v2 Architecture
 
-**Status**: Proposed
+**Status**: Implemented (local tested, cloud written)
 **Date**: 2026-01-08
 **Goal**: Production transcription service using Parakeet, optimized for Cloudflare free tier + Modal GPU
 
