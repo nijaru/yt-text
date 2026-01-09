@@ -10,6 +10,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# nemo_toolkit is installed in Modal container image, not locally
+# Add it here only if you need to run locally with NVIDIA GPU
+nemo = [
+    "nemo_toolkit[asr]>=2.0.0",
+]
 dev = [
     "ruff>=0.8.0",
 ]

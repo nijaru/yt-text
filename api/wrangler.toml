@@ -26,6 +26,7 @@ max_retries = 3
 # Environment variables (set via wrangler secret)
 # MODAL_TOKEN_ID - Modal API token ID
 # MODAL_TOKEN_SECRET - Modal API token secret
+# CALLBACK_SECRET - Secret for authenticating Modal callbacks
 
 [vars]
 ENVIRONMENT = "development"

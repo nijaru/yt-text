@@ -6,34 +6,34 @@ Fast video transcription using NVIDIA Parakeet ASR. A portfolio project demonstr
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                    Cloudflare (Free Tier)                        │
-│  ┌─────────────┐    ┌─────────────┐    ┌─────────────────────┐  │
-│  │   Workers   │    │     D1      │    │         R2          │  │
-│  │  (Hono API) │───▶│  (SQLite)   │    │     (Storage)       │  │
-│  │   + htmx    │    └─────────────┘    └─────────────────────┘  │
-│  └──────┬──────┘                                                 │
-│         │ Queue                                                  │
-└─────────┼───────────────────────────────────────────────────────┘
+│                    Cloudflare (Free Tier)                       │
+│  ┌─────────────┐    ┌─────────────┐    ┌─────────────────────┐ │
+│  │   Workers   │    │     D1      │    │         R2          │ │
+│  │  (Hono API) │───▶│  (SQLite)   │    │     (Storage)       │ │
+│  │   + htmx    │    └─────────────┘    └─────────────────────┘ │
+│  └──────┬──────┘                                                │
+│         │ Queue                                                 │
+└─────────┼──────────────────────────────────────────────────────┘
           │
           ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                        Modal (GPU)                               │
+│                        Modal (GPU)                              │
 │  ┌─────────────────────────────────────────────────────────────┐│
-│  │  Parakeet TDT 0.6B  •  yt-dlp  •  NVIDIA L4                 ││
-│  │  3000x realtime  •  6% WER  •  $0.80/hr                     ││
+│  │  Parakeet TDT 0.6B  •  yt-dlp  •  NVIDIA L4                ││
+│  │  3000x realtime  •  6% WER  •  $0.80/hr                    ││
 │  └─────────────────────────────────────────────────────────────┘│
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-## Why This Architecture?
+## Design Decisions
 
 | Decision                   | Rationale                                           |
 | -------------------------- | --------------------------------------------------- |
-| **Parakeet over Whisper**  | 16x faster, 40% lower error rate                    |
+| **Parakeet over Whisper**  | 16x faster, 40% lower word error rate               |
 | **Edge API + GPU compute** | Fast responses globally, pay only for transcription |
 | **htmx over SPA**          | Server-rendered, minimal JS, simpler                |
 | **Cloudflare free tier**   | 100K requests/day, 5GB D1, 10GB R2                  |
-| **Modal serverless GPU**   | Scale to zero, $30/month free credits               |
+| **Modal serverless GPU**   | Scale to zero, $30/month ongoing free credits       |
 
 ## Project Structure
 
@@ -44,12 +44,37 @@ yt-text/
 │   ├── schema.sql          # D1 database schema
 │   └── wrangler.toml       # Cloudflare configuration
 ├── modal/                  # GPU transcription worker
-│   ├── app.py              # Parakeet + yt-dlp
-│   └── pyproject.toml
-├── local/                  # Local development (Apple Silicon)
-│   ├── cli.py              # CLI using parakeet-mlx
-│   └── pyproject.toml
-└── ai/design/              # Architecture documentation
+│   └── app.py              # Parakeet + yt-dlp
+└── local/                  # Local CLI (Apple Silicon)
+    └── cli.py              # Multi-backend CLI
+```
+
+## API Endpoints
+
+```
+POST /api/transcribe
+  Body: { url: string, language?: string }
+  Response: { jobId: string, status: "queued" }
+
+GET /api/jobs/:id
+  Response: { jobId, status, progress, result?, error? }
+
+GET /api/jobs/:id/stream
+  Response: SSE stream of status updates
+
+GET /api/jobs/:id/result
+  Response: { text, duration, wordCount }
+
+POST /api/jobs/:id/retry
+  Response: { jobId, status: "queued" }
+```
+
+### Job States
+
+```
+queued → downloading → transcribing → complete
+              ↓              ↓
+            failed ←────────┘
 ```
 
 ## Local Development
@@ -113,6 +138,11 @@ wrangler r2 bucket create yt-text-storage
 
 # Create queue
 wrangler queues create transcription-jobs
+
+# Set secrets
+wrangler secret put MODAL_TOKEN_ID
+wrangler secret put MODAL_TOKEN_SECRET
+wrangler secret put CALLBACK_SECRET
 
 # Deploy
 wrangler deploy

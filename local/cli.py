@@ -79,23 +79,27 @@ def download_audio(url: str, output_dir: Path) -> Path:
     """Download audio from URL using yt-dlp."""
     output_template = str(output_dir / "audio.%(ext)s")
 
-    result = subprocess.run(
-        [
-            "yt-dlp",
-            "-x",
-            "--audio-format",
-            "wav",
-            "--audio-quality",
-            "0",
-            "--postprocessor-args",
-            "ffmpeg:-ar 16000 -ac 1",
-            "-o",
-            output_template,
-            url,
-        ],
-        capture_output=True,
-        text=True,
-    )
+    try:
+        result = subprocess.run(
+            [
+                "yt-dlp",
+                "-x",
+                "--audio-format",
+                "wav",
+                "--audio-quality",
+                "0",
+                "--postprocessor-args",
+                "ffmpeg:-ar 16000 -ac 1",
+                "-o",
+                output_template,
+                url,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=300,  # 5 min download timeout
+        )
+    except subprocess.TimeoutExpired as e:
+        raise RuntimeError("Download timed out after 5 minutes") from e
 
     if result.returncode != 0:
         raise RuntimeError(f"yt-dlp failed: {result.stderr}")
@@ -110,21 +114,27 @@ def download_audio(url: str, output_dir: Path) -> Path:
 
 def convert_to_wav(input_path: Path, output_path: Path) -> None:
     """Convert audio to 16kHz mono WAV using ffmpeg."""
-    subprocess.run(
-        [
-            "ffmpeg",
-            "-y",
-            "-i",
-            str(input_path),
-            "-ar",
-            "16000",
-            "-ac",
-            "1",
-            str(output_path),
-        ],
-        capture_output=True,
-        check=True,
-    )
+    try:
+        result = subprocess.run(
+            [
+                "ffmpeg",
+                "-y",
+                "-i",
+                str(input_path),
+                "-ar",
+                "16000",
+                "-ac",
+                "1",
+                str(output_path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=120,  # 2 min conversion timeout
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"ffmpeg failed: {result.stderr}")
+    except subprocess.TimeoutExpired as e:
+        raise RuntimeError("Audio conversion timed out") from e
 
 
 def transcribe_mlx(audio_path: Path) -> dict:
