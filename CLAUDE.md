@@ -10,7 +10,7 @@ Video transcription service using NVIDIA Parakeet ASR. Portfolio project demonst
 Cloudflare (Edge)              Modal (GPU Compute)
 ┌─────────────────────┐        ┌─────────────────┐
 │  Workers (Hono API) │──Queue─│  Parakeet TDT   │
-│  D1 (SQLite)        │◀─────callback───────────│
+│  D1 (SQLite)        │◀─────callback─────────── │
 │  R2 (Storage)       │        │  yt-dlp         │
 │  htmx Frontend      │        └─────────────────┘
 └─────────────────────┘
