@@ -1,0 +1,25 @@
+[project]
+name = "yt-text-local"
+version = "0.1.0"
+description = "Local transcription CLI using Parakeet MLX (Apple Silicon)"
+requires-python = ">=3.12"
+dependencies = [
+    "parakeet-mlx>=0.2.0",
+    "yt-dlp>=2024.11.18",
+    "rich>=13.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.8.0",
+]
+
+[project.scripts]
+yt-text = "cli:main"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]

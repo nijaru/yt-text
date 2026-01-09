@@ -1,204 +1,155 @@
 # yt-text
 
-A high-performance video transcription service that downloads and transcribes videos from YouTube and other platforms. Built with Python, Litestar, and multiple Whisper backends for optimal accuracy and speed.
+Fast video transcription using NVIDIA Parakeet ASR. A portfolio project demonstrating modern serverless architecture with edge computing and GPU inference.
 
-## Features
+## Architecture
 
-- 🎥 **Universal Video Support** - Download from YouTube, Vimeo, Twitter, TikTok, and 1000+ sites via yt-dlp
-- 🚀 **Multiple Transcription Backends** - MLX (Apple Silicon), whisper.cpp, OpenAI API, and fallback Whisper
-- ⚡ **Async Architecture** - Built on Litestar for high-performance async operations
-- 💾 **Smart Caching** - Automatic caching of transcription results
-- 🔄 **Real-time Updates** - WebSocket support for live transcription progress
-- 🖥️ **CLI Tool** - Standalone command-line interface for quick transcriptions
-- 📊 **Job Management** - Track transcription jobs with status, progress, and history
-
-## Quick Start
-
-### Installation
-
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/nijaru/yt-text.git
-   cd yt-text
-   ```
-
-2. Install dependencies with uv:
-   ```bash
-   uv sync
-   ```
-
-### Command Line Usage
-
-Transcribe a video directly from the command line:
-
-```bash
-# Basic usage
-uv run transcribe "https://www.youtube.com/watch?v=VIDEO_ID"
-
-# Specify model and language
-uv run transcribe "https://www.youtube.com/watch?v=VIDEO_ID" -m base -l en
-
-# Save to file
-uv run transcribe "https://www.youtube.com/watch?v=VIDEO_ID" -o transcript.txt
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    Cloudflare (Free Tier)                        │
+│  ┌─────────────┐    ┌─────────────┐    ┌─────────────────────┐  │
+│  │   Workers   │    │     D1      │    │         R2          │  │
+│  │  (Hono API) │───▶│  (SQLite)   │    │     (Storage)       │  │
+│  │   + htmx    │    └─────────────┘    └─────────────────────┘  │
+│  └──────┬──────┘                                                 │
+│         │ Queue                                                  │
+└─────────┼───────────────────────────────────────────────────────┘
+          │
+          ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                        Modal (GPU)                               │
+│  ┌─────────────────────────────────────────────────────────────┐│
+│  │  Parakeet TDT 0.6B  •  yt-dlp  •  NVIDIA L4                 ││
+│  │  3000x realtime  •  6% WER  •  $0.80/hr                     ││
+│  └─────────────────────────────────────────────────────────────┘│
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-### Web Server
+## Why This Architecture?
 
-Start the web server for API access:
+| Decision                   | Rationale                                           |
+| -------------------------- | --------------------------------------------------- |
+| **Parakeet over Whisper**  | 16x faster, 40% lower error rate                    |
+| **Edge API + GPU compute** | Fast responses globally, pay only for transcription |
+| **htmx over SPA**          | Server-rendered, minimal JS, simpler                |
+| **Cloudflare free tier**   | 100K requests/day, 5GB D1, 10GB R2                  |
+| **Modal serverless GPU**   | Scale to zero, $30/month free credits               |
 
-```bash
-# Development server with auto-reload
-uv run litestar --app src.api.app:app run --reload
+## Project Structure
 
-# Production server
-uv run litestar --app src.api.app:app run --host 0.0.0.0 --port 8000
-```
-
-## API Endpoints
-
-### Submit Transcription Job
-```http
-POST /api/transcribe
-Content-Type: application/json
-
-{
-  "url": "https://www.youtube.com/watch?v=VIDEO_ID",
-  "model": "base",
-  "language": "auto"
-}
-```
-
-### Check Job Status
-```http
-GET /api/jobs/{job_id}
-```
-
-### Get Transcription Result
-```http
-GET /api/jobs/{job_id}/result
-```
-
-### WebSocket Updates
-```javascript
-ws://localhost:8000/ws/jobs/{job_id}
-```
-
-## Transcription Backends
-
-The service automatically selects the best available backend:
-
-1. **MLX Whisper** (Apple Silicon only)
-   - Optimized for M1/M2/M3 Macs
-   - Models: tiny, base, small, medium, large
-
-2. **whisper.cpp** (Recommended for production)
-   - High performance C++ implementation
-   - Low memory usage with quantized models
-   - Cross-platform support
-
-3. **OpenAI API** (Cloud fallback)
-   - Requires API key in environment
-   - Usage limits configurable
-   - High accuracy
-
-4. **Fallback Whisper** (Reference implementation)
-   - Original OpenAI Whisper
-   - Always available as last resort
-
-## Configuration
-
-Create a `.env` file for custom configuration:
-
-```env
-# API Server
-APP_PORT=8000
-APP_ENV=production
-
-# Database
-APP_DATABASE_URL=sqlite+aiosqlite:///data/db.sqlite
-
-# Transcription
-APP_WHISPER_MODEL=base
-APP_TRANSCRIPTION_BACKENDS=["whisper_cpp", "mlx", "openai"]
-
-# OpenAI (optional)
-APP_OPENAI_API_KEY=your-api-key
-APP_OPENAI_DAILY_LIMIT=100
-
-# Performance
-APP_MAX_CONCURRENT_JOBS=3
-APP_MAX_VIDEO_DURATION=14400  # 4 hours
-APP_MAX_FILE_SIZE=2147483648  # 2GB
-```
-
-## Docker
-
-Build and run with Docker:
-
-```bash
-# Build image
-docker build -t yt-text .
-
-# Run container
-docker run -p 8000:8000 -v ./data:/app/data yt-text
-
-# Or use docker-compose
-docker-compose up
-```
-
-## Development
-
-### Project Structure
 ```
 yt-text/
-├── src/
-│   ├── api/          # Litestar web application
-│   ├── core/         # Core models and configuration
-│   ├── services/     # Business logic services
-│   └── lib/          # Transcription backends
-├── docs/             # Documentation
-├── static/           # Frontend files
-└── tests/            # Test suite
+├── api/                    # Cloudflare Workers API
+│   ├── src/index.ts        # Hono routes + htmx templates
+│   ├── schema.sql          # D1 database schema
+│   └── wrangler.toml       # Cloudflare configuration
+├── modal/                  # GPU transcription worker
+│   ├── app.py              # Parakeet + yt-dlp
+│   └── pyproject.toml
+├── local/                  # Local development (Apple Silicon)
+│   ├── cli.py              # CLI using parakeet-mlx
+│   └── pyproject.toml
+└── ai/design/              # Architecture documentation
 ```
 
-### Testing
+## Local Development
 
-Run the test suite:
+Run transcription locally on Apple Silicon (M1/M2/M3):
 
 ```bash
-# Basic functionality test
-uv run python test_basic.py
-
-# Full test suite (coming soon)
-uv run pytest
+cd local
+uv sync
+uv run cli.py https://youtube.com/watch?v=...
 ```
+
+Or transcribe a local file:
+
+```bash
+uv run cli.py ~/Downloads/podcast.mp3
+```
+
+## API Development
+
+```bash
+cd api
+bun install
+bun run dev
+```
+
+Then open http://localhost:8787
+
+## Deployment (Optional)
+
+### Modal Worker
+
+```bash
+cd modal
+uv sync
+modal deploy app.py
+```
+
+### Cloudflare API
+
+```bash
+cd api
+
+# Create D1 database
+wrangler d1 create yt-text-db
+wrangler d1 execute yt-text-db --file schema.sql
+
+# Create R2 bucket
+wrangler r2 bucket create yt-text-storage
+
+# Create queue
+wrangler queues create transcription-jobs
+
+# Deploy
+wrangler deploy
+```
+
+## Stack
+
+| Layer    | Technology        | Purpose                      |
+| -------- | ----------------- | ---------------------------- |
+| Frontend | htmx + Tailwind   | Server-rendered UI           |
+| API      | Hono + TypeScript | Edge routing, job management |
+| Database | Cloudflare D1     | Job persistence              |
+| Storage  | Cloudflare R2     | Audio files, results         |
+| Queue    | Cloudflare Queues | Async job processing         |
+| Compute  | Modal + L4 GPU    | Parakeet inference           |
+| Local    | parakeet-mlx      | Apple Silicon development    |
 
 ## Performance
 
-- **Transcription Speed**: ~7x realtime on Apple Silicon (19.7s for 142s video)
-- **Memory Usage**: <2GB during transcription
-- **Concurrent Jobs**: Configurable (default: 3)
-- **Caching**: Automatic result caching with DiskCache
+| Metric              | Value                                  |
+| ------------------- | -------------------------------------- |
+| Transcription speed | 3000x realtime (Modal) / 100x (M3 Max) |
+| Word error rate     | ~6% (Parakeet TDT 0.6B)                |
+| API latency         | <50ms (Cloudflare edge)                |
+| Cold start          | ~10s (Modal with GPU snapshotting)     |
 
-## Requirements
+## Cost Analysis
 
-- Python 3.12+
-- ffmpeg (for audio processing)
-- 2GB+ RAM recommended
-- Optional: Apple Silicon for MLX acceleration
+**For a portfolio/demo project:**
+
+| Service            | Free Tier    | Covers        |
+| ------------------ | ------------ | ------------- |
+| Cloudflare Workers | 100K req/day | API           |
+| Cloudflare D1      | 5GB          | Database      |
+| Cloudflare R2      | 10GB         | Storage       |
+| Modal              | $30/month    | ~37 GPU hours |
+
+**Effective cost**: Free for light usage, ~$0.01 per audio hour at scale.
 
 ## License
 
-This project is licensed under the GNU Affero General Public License (AGPL) version 3. See the [LICENSE](LICENSE) file for details.
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
+AGPL-3.0 - See [LICENSE](LICENSE)
 
 ## Acknowledgements
 
+- [NVIDIA Parakeet](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2) - State-of-the-art ASR
+- [parakeet-mlx](https://github.com/senstella/parakeet-mlx) - Apple Silicon port
 - [yt-dlp](https://github.com/yt-dlp/yt-dlp) - Video downloading
-- [OpenAI Whisper](https://github.com/openai/whisper) - Speech recognition models
-- [MLX](https://github.com/ml-explore/mlx) - Apple Silicon acceleration
-- [whisper.cpp](https://github.com/ggerganov/whisper.cpp) - High-performance C++ implementation
-- [Litestar](https://github.com/litestar-org/litestar) - Modern async Python web framework
+- [Hono](https://hono.dev) - Edge-first web framework
+- [htmx](https://htmx.org) - HTML-driven interactivity
+- [Modal](https://modal.com) - Serverless GPU compute
