@@ -670,9 +670,6 @@ function renderProgress(job: Job) {
 function renderResult(job: Job) {
 	const escapedText = escapeHtml(job.text ?? "");
 	const escapedId = escapeHtml(job.id);
-	const hasSubtitles =
-		job.subtitles_raw !== null && job.subtitles_raw !== undefined;
-	const escapedSubtitles = hasSubtitles ? escapeHtml(job.subtitles_raw!) : "";
 
 	return `
 <div class="bg-zinc-900 border border-zinc-800 rounded-lg p-6 space-y-4">
@@ -693,29 +690,16 @@ function renderResult(job: Job) {
     <p class="text-zinc-200 whitespace-pre-wrap leading-relaxed" id="transcript-text">${escapedText}</p>
   </div>
 
-  ${hasSubtitles ? `<textarea id="subtitles-raw" class="hidden">${escapedSubtitles}</textarea>` : ""}
-
-  <div class="flex items-center gap-2">
+  <div class="flex gap-2">
     <button
       onclick="navigator.clipboard.writeText(document.getElementById('transcript-text').textContent)"
       class="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-sm transition-colors"
     >
       Copy
     </button>
-    ${
-			hasSubtitles
-				? `
-    <select id="format-select" class="px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-sm text-zinc-300">
-      <option value="txt">Plain Text (.txt)</option>
-      <option value="srt">With Timestamps (.srt)</option>
-      <option value="vtt">WebVTT (.vtt)</option>
-    </select>
-    `
-				: ""
-		}
     <button
       data-job-id="${escapedId}"
-      onclick="downloadTranscript(this.dataset.jobId)"
+      onclick="downloadText(this.dataset.jobId)"
       class="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-sm transition-colors"
     >
       Download
@@ -724,48 +708,15 @@ function renderResult(job: Job) {
 </div>
 
 <script>
-function downloadTranscript(id) {
-  const formatSelect = document.getElementById('format-select');
-  const format = formatSelect ? formatSelect.value : 'txt';
-
-  let content, filename, mimeType;
-
-  if (format === 'txt') {
-    content = document.getElementById('transcript-text').textContent;
-    filename = id + '.txt';
-    mimeType = 'text/plain';
-  } else if (format === 'srt') {
-    const vtt = document.getElementById('subtitles-raw')?.value || '';
-    content = vttToSrt(vtt);
-    filename = id + '.srt';
-    mimeType = 'text/plain';
-  } else if (format === 'vtt') {
-    content = document.getElementById('subtitles-raw')?.value || '';
-    filename = id + '.vtt';
-    mimeType = 'text/vtt';
-  }
-
-  const blob = new Blob([content], { type: mimeType });
+function downloadText(id) {
+  const text = document.getElementById('transcript-text').textContent;
+  const blob = new Blob([text], { type: 'text/plain' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = filename;
+  a.download = id + '.txt';
   a.click();
   URL.revokeObjectURL(url);
-}
-
-function vttToSrt(vtt) {
-  // Convert VTT to SRT format
-  let srt = vtt
-    .replace(/WEBVTT\\n/g, '')
-    .replace(/Kind:.*\\n/g, '')
-    .replace(/Language:.*\\n/g, '')
-    .replace(/(\\d{2}:\\d{2}:\\d{2})\\.(\\d{3})/g, '$1,$2')  // . to , in timestamps
-    .trim();
-
-  // Add sequence numbers
-  const blocks = srt.split(/\\n\\n+/).filter(b => b.trim());
-  return blocks.map((block, i) => (i + 1) + '\\n' + block).join('\\n\\n');
 }
 </script>`;
 }
