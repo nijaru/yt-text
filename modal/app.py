@@ -373,6 +373,7 @@ def extract_captions(
             "job_id": job_id,
             "status": "complete",
             "text": text,
+            "subtitles_raw": raw_text,  # Original VTT for timestamp downloads
             "duration": round(duration, 1) if duration else None,
             "word_count": len(text.split()),
             "source": "youtube_captions",

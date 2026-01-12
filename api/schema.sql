@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     language TEXT DEFAULT 'en',
     mode TEXT DEFAULT 'transcribe',  -- 'transcribe' or 'extract'
     text TEXT,
+    subtitles_raw TEXT,  -- Original VTT/SRT for extract mode
     error TEXT,
     duration INTEGER,
     word_count INTEGER,
