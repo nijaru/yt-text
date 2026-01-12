@@ -322,9 +322,9 @@ def extract_captions(
                     "--write-auto-sub",
                     "--write-sub",
                     "--sub-lang",
-                    language,
+                    f"{language},{language}-orig,{language}-US",
                     "--sub-format",
-                    "vtt/srt/best",
+                    "vtt",
                     "--skip-download",
                     "-o",
                     str(output_path),
@@ -336,7 +336,8 @@ def extract_captions(
                 text=True,
                 timeout=60,
             )
-            if result.returncode != 0:
+            # Don't fail on returncode - yt-dlp may return non-zero but still download subs
+            if result.returncode != 0 and "error" in result.stderr.lower():
                 raise RuntimeError(f"yt-dlp failed: {result.stderr}")
         except subprocess.TimeoutExpired as e:
             raise RuntimeError("Caption extraction timed out") from e
