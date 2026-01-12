@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     status TEXT NOT NULL DEFAULT 'queued',
     progress INTEGER NOT NULL DEFAULT 0,
     language TEXT DEFAULT 'en',
+    mode TEXT DEFAULT 'transcribe',  -- 'transcribe' or 'extract'
     text TEXT,
     error TEXT,
     duration INTEGER,

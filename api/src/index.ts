@@ -23,14 +23,18 @@ type Bindings = {
 type JobStatus =
 	| "queued"
 	| "downloading"
+	| "extracting"
 	| "transcribing"
 	| "complete"
 	| "failed";
+
+type JobMode = "transcribe" | "extract";
 
 interface Job {
 	id: string;
 	url: string;
 	language: string;
+	mode: JobMode;
 	status: JobStatus;
 	progress: number;
 	text: string | null;
@@ -138,8 +142,8 @@ app.post("/api/transcribe", async (c) => {
 
 	// Insert job into D1
 	await c.env.DB.prepare(
-		`INSERT INTO jobs (id, url, status, progress, language, created_at, updated_at)
-     VALUES (?, ?, 'queued', 0, ?, ?, ?)`,
+		`INSERT INTO jobs (id, url, status, progress, language, mode, created_at, updated_at)
+     VALUES (?, ?, 'queued', 0, ?, 'transcribe', ?, ?)`,
 	)
 		.bind(id, url, language, now, now)
 		.run();
@@ -159,6 +163,7 @@ app.post("/api/transcribe", async (c) => {
 				id,
 				url,
 				language,
+				mode: "transcribe",
 				status: "queued",
 				progress: 0,
 				text: null,
@@ -172,6 +177,92 @@ app.post("/api/transcribe", async (c) => {
 	}
 
 	return c.json({ jobId: id, status: "queued" });
+});
+
+// Extract captions (fast, free - no GPU)
+app.post("/api/extract", async (c) => {
+	let url: string;
+	let language: string = "en";
+
+	// Parse form data or JSON
+	const contentType = c.req.header("Content-Type") || "";
+	try {
+		if (contentType.includes("application/x-www-form-urlencoded")) {
+			const formData = await c.req.formData();
+			url = formData.get("url") as string;
+			language = (formData.get("language") as string) || "en";
+		} else {
+			const body = await c.req.json<{ url: string; language?: string }>();
+			url = body.url;
+			language = body.language || "en";
+		}
+	} catch {
+		return c.json({ error: "Invalid request body" }, 400);
+	}
+
+	if (!url) {
+		return c.json({ error: "URL is required" }, 400);
+	}
+
+	// Validate URL
+	const validation = validateUrl(url);
+	if (!validation.valid) {
+		return c.json({ error: validation.error }, 400);
+	}
+
+	const id = crypto.randomUUID();
+	const now = new Date().toISOString();
+
+	// Insert job into D1
+	await c.env.DB.prepare(
+		`INSERT INTO jobs (id, url, status, progress, language, mode, created_at, updated_at)
+     VALUES (?, ?, 'extracting', 50, ?, 'extract', ?, ?)`,
+	)
+		.bind(id, url, language, now, now)
+		.run();
+
+	// Call Modal extract function directly (no queue needed - it's fast)
+	const callbackUrl = `${new URL(c.req.url).origin}/api/jobs/${id}/callback`;
+
+	// Fire and forget - Modal will callback when done
+	fetch("https://nijaru--yt-text-extract-captions.modal.run", {
+		method: "POST",
+		headers: {
+			"Content-Type": "application/json",
+			Authorization: `Bearer ${c.env.MODAL_TOKEN_ID}:${c.env.MODAL_TOKEN_SECRET}`,
+		},
+		body: JSON.stringify({
+			url,
+			job_id: id,
+			callback_url: callbackUrl,
+			callback_secret: c.env.CALLBACK_SECRET,
+			language,
+		}),
+	}).catch((err) => {
+		console.error("Failed to call Modal extract:", err);
+	});
+
+	// Return HTML partial for htmx or JSON for API clients
+	if (contentType.includes("application/x-www-form-urlencoded")) {
+		return c.html(
+			renderProgress({
+				id,
+				url,
+				language,
+				mode: "extract",
+				status: "extracting",
+				progress: 50,
+				text: null,
+				error: null,
+				duration: null,
+				word_count: null,
+				created_at: now,
+				updated_at: now,
+			}),
+		);
+	}
+
+	return c.json({ jobId: id, status: "extracting" });
 });
 
 // Get job status
@@ -325,18 +416,43 @@ app.post("/api/jobs/:id/retry", async (c) => {
 	}
 
 	const now = new Date().toISOString();
+	const callbackUrl = `${new URL(c.req.url).origin}/api/jobs/${id}/callback`;
+	const isExtract = job.mode === "extract";
+
+	// Update status based on mode
 	await c.env.DB.prepare(
-		`UPDATE jobs SET status = 'queued', error = NULL, progress = 0, updated_at = ? WHERE id = ?`,
+		`UPDATE jobs SET status = ?, error = NULL, progress = ?, updated_at = ? WHERE id = ?`,
 	)
-		.bind(now, id)
+		.bind(isExtract ? "extracting" : "queued", isExtract ? 50 : 0, now, id)
 		.run();
 
-	await c.env.JOBS_QUEUE.send({
-		jobId: id,
-		url: job.url,
-		language: job.language || "en",
-		callbackUrl: `${new URL(c.req.url).origin}/api/jobs/${id}/callback`,
-	});
+	if (isExtract) {
+		// Call Modal extract function directly
+		fetch("https://nijaru--yt-text-extract-captions.modal.run", {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+				Authorization: `Bearer ${c.env.MODAL_TOKEN_ID}:${c.env.MODAL_TOKEN_SECRET}`,
+			},
+			body: JSON.stringify({
+				url: job.url,
+				job_id: id,
+				callback_url: callbackUrl,
+				callback_secret: c.env.CALLBACK_SECRET,
+				language: job.language || "en",
+			}),
+		}).catch((err) => {
+			console.error("Failed to call Modal extract:", err);
+		});
+	} else {
+		// Queue for transcription
+		await c.env.JOBS_QUEUE.send({
+			jobId: id,
+			url: job.url,
+			language: job.language || "en",
+			callbackUrl,
+		});
+	}
 
 	// Return HTML partial for htmx
 	const contentType = c.req.header("Content-Type") || "";
@@ -347,15 +463,15 @@ app.post("/api/jobs/:id/retry", async (c) => {
 		return c.html(
 			renderProgress({
 				...job,
-				status: "queued",
-				progress: 0,
+				status: isExtract ? "extracting" : "queued",
+				progress: isExtract ? 50 : 0,
 				error: null,
 				updated_at: now,
 			}),
 		);
 	}
 
-	return c.json({ jobId: id, status: "queued" });
+	return c.json({ jobId: id, status: isExtract ? "extracting" : "queued" });
 });
 
 // htmx partials
@@ -467,29 +583,40 @@ function renderPage() {
       <p class="text-zinc-400">Fast video transcription powered by Parakeet</p>
     </header>
 
-    <form
-      hx-post="/api/transcribe"
-      hx-target="#result"
-      hx-swap="innerHTML"
-      hx-indicator="#spinner"
-      class="space-y-4"
-    >
-      <div class="flex gap-2">
-        <input
-          type="url"
-          name="url"
-          placeholder="Paste a YouTube URL..."
-          required
-          class="flex-1 bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-lg focus:outline-none focus:border-zinc-600 transition-colors"
-        >
+    <div class="space-y-4">
+      <input
+        type="url"
+        id="url-input"
+        name="url"
+        placeholder="Paste a YouTube URL..."
+        required
+        class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-lg focus:outline-none focus:border-zinc-600 transition-colors"
+      >
+      <div class="flex gap-3">
         <button
-          type="submit"
-          class="bg-zinc-100 text-zinc-900 px-6 py-3 rounded-lg font-medium hover:bg-white transition-colors"
+          hx-post="/api/extract"
+          hx-target="#result"
+          hx-swap="innerHTML"
+          hx-indicator="#spinner"
+          hx-include="#url-input"
+          class="flex-1 bg-zinc-800 text-zinc-100 px-6 py-3 rounded-lg font-medium hover:bg-zinc-700 transition-colors border border-zinc-700"
         >
-          Transcribe
+          <span class="block">Extract Captions</span>
+          <span class="block text-xs text-zinc-400 mt-1">Instant &bull; Free</span>
+        </button>
+        <button
+          hx-post="/api/transcribe"
+          hx-target="#result"
+          hx-swap="innerHTML"
+          hx-indicator="#spinner"
+          hx-include="#url-input"
+          class="flex-1 bg-zinc-100 text-zinc-900 px-6 py-3 rounded-lg font-medium hover:bg-white transition-colors"
+        >
+          <span class="block">Transcribe with AI</span>
+          <span class="block text-xs text-zinc-600 mt-1">Parakeet &bull; Higher quality</span>
         </button>
       </div>
-    </form>
+    </div>
 
     <div id="spinner" class="htmx-indicator text-center py-8">
       <div class="inline-block animate-spin rounded-full h-8 w-8 border-2 border-zinc-400 border-t-transparent"></div>
@@ -506,6 +633,7 @@ function renderProgress(job: Job) {
 	const statusText: Record<JobStatus, string> = {
 		queued: "Waiting in queue...",
 		downloading: "Downloading audio...",
+		extracting: "Extracting captions...",
 		transcribing: "Transcribing with Parakeet...",
 		complete: "Complete",
 		failed: "Failed",

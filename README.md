@@ -1,6 +1,11 @@
 # yt-text
 
-Fast video transcription using NVIDIA Parakeet ASR. A portfolio project demonstrating modern serverless architecture with edge computing and GPU inference.
+Fast video transcription with two modes:
+
+- **Extract Captions** - Instant, free. Pulls existing YouTube auto-captions.
+- **Transcribe with AI** - Higher quality. Uses NVIDIA Parakeet ASR (16x faster than Whisper).
+
+A portfolio project demonstrating modern serverless architecture with edge computing and GPU inference.
 
 ## Architecture
 
